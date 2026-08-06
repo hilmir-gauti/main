@@ -16,6 +16,7 @@ handvirkt (DNS-færslur, Twilio-slóðir, Google-tenging).
 ## Innihald
 
 - [Byrjað](#byrjað)
+- [Keyrsluskrá (.exe)](#sem-forrit-exe)
 - [Hvað kerfið gerir](#hvað-kerfið-gerir)
 - [Spurningaflæði eftir fagi](#spurningaflæði-eftir-fagi)
 - [Vefsíðugerð](#vefsíðugerð)
@@ -29,10 +30,45 @@ handvirkt (DNS-færslur, Twilio-slóðir, Google-tenging).
 
 ## Byrjað
 
+### Sem forrit (.exe)
+
+Sæktu `RafraenThjonusta.exe` og tvísmelltu á hana. Forritið ræsir sig, opnar
+vafrann og býður þér að stofna aðganginn þinn — engin uppsetning, enginn
+gagnagrunnur að setja upp, engin skipanalína.
+
+Til að smíða keyrsluskrána sjálf/ur:
+
+```bash
+npm install
+npm run exe          # Windows .exe í dist-exe/
+npm run exe:all      # Windows, macOS og Linux
+```
+
+Gögnin þín eru geymd hjá þér:
+
+| Kerfi | Staðsetning |
+| --- | --- |
+| Windows | `%APPDATA%\RafraenThjonusta` |
+| macOS | `~/Library/Application Support/RafraenThjonusta` |
+| Linux | `~/.local/share/rafraen-thjonusta` |
+
+Þar er gagnagrunnurinn (`rafraen.sqlite`), myndaðar vefsíður og
+stillingaskráin. **Taktu afrit af þessari möppu reglulega** — hún er allt
+kerfið.
+
+Keyrsluskráin er um 84 MB því hún inniheldur Node-keyrsluumhverfið sjálft.
+Ekkert þarf að setja upp á vélinni.
+
+> **Windows SmartScreen** — skráin er ekki undirrituð með kóðaskírteini, svo
+> Windows sýnir viðvörun í fyrsta skipti. Veldu „More info“ og svo
+> „Run anyway“. Til að losna við það þarf Authenticode-skírteini.
+
+### Sem þjónn (fyrir hýsingu)
+
 Krafa: **Node.js 22.5 eða nýrra** (kerfið notar innbyggða SQLite-einingu Node).
 
 ```bash
-npm install                 # aðeins TypeScript — engar keyrsluháðar einingar
+npm install                 # aðeins þýðingartól — engar keyrsluháðar einingar
 cp .env.example .env        # fylltu út það sem þú átt; restin fer í þurrkeyrslu
 npm run setup               # stofnar stjórnandaaðganginn þinn
 npm run seed                # valfrjálst: þrír sýniviðskiptavinir með bókunum
@@ -269,6 +305,9 @@ src/
 ├── admin/           Stjórnborðið
 ├── publicapi/       Bókunarviðmót vefsíðna
 └── mobileapi/       Viðmót snjallsímaappsins
+
+src/desktop/         Ræsing sem skjáborðsforrit (gagnamappa, port, vafri)
+build/make-exe.mjs   Smíðar keyrsluskrá: esbuild → SEA-blob → Node-keyrslu
 
 mobile/              Expo-app fyrir iOS og Android
 tests/               139 prófanir

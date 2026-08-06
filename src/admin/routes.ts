@@ -8,7 +8,7 @@
 
 import { all, get } from '../core/db.ts';
 import { ValidationError, isAppError } from '../core/errors.ts';
-import { html, raw, type SafeHtml } from '../core/html.ts';
+import { html, jsonScript, raw, type SafeHtml } from '../core/html.ts';
 import { formatKennitala, normalizePhone } from '../core/iceland.ts';
 import { logger } from '../core/logger.ts';
 import {
@@ -25,8 +25,8 @@ import {
   type Weekday,
 } from '../core/time.ts';
 import { upcomingHolidays } from '../core/holidays.ts';
-import { config, integrationStatus } from '../config.ts';
-import { SESSION_COOKIE, login, logout } from '../domain/auth.ts';
+import { config, integrationStatus, useSecureCookies } from '../config.ts';
+import { SESSION_COOKIE, login, logout, operatorCount } from '../domain/auth.ts';
 import {
   bookingStats,
   bookingsOnDate,
@@ -73,7 +73,8 @@ import { Router } from '../http/router.ts';
 import type { RequestContext } from '../http/context.ts';
 import { chosenVariant, generateVariants, latestBuild, listVariants, publishVariant } from '../website/generator.ts';
 import { servePreview } from '../publicapi/routes.ts';
-import { csrfField, emptyState, money, page, statCard, statusTag, when } from './layout.ts';
+import { csrfField, emptyState, icon, money, page, statCard, statusTag, when } from './layout.ts';
+import { registerFirstRun } from './firstrun.ts';
 
 const WEEKDAY_LABELS: Record<Weekday, string> = {
   1: 'Mánudagur', 2: 'Þriðjudagur', 3: 'Miðvikudagur', 4: 'Fimmtudagur',
@@ -112,12 +113,18 @@ export function adminRouter(): Router {
   const router = new Router();
   router.use(loadSession);
 
+  // The packaged desktop build has no terminal, so the very first account is
+  // created through the browser instead of a setup script.
+  registerFirstRun(router);
+
   // =======================================================================
   // Authentication
   // =======================================================================
 
   router.get('/innskraning', (ctx) => {
     if (ctx.session) return redirect('/stjornbord');
+    // Nothing to log into yet — send them to first-run setup.
+    if (operatorCount() === 0) return redirect('/uppsetning');
     return htmlResponse(loginPage(ctx.query.get('next') ?? '/stjornbord', null));
   });
 
@@ -133,7 +140,7 @@ export function adminRouter(): Router {
 
       const cookie = serializeCookie(SESSION_COOKIE, result.sessionToken, {
         maxAgeSec: config.operator.sessionTtlHours * 3600,
-        secure: config.isProduction,
+        secure: useSecureCookies(),
         sameSite: 'Lax',
       });
       return withCookie(redirect(next), cookie);
@@ -562,16 +569,15 @@ export function adminRouter(): Router {
             : html`<div class="grid grid-3">
                 ${variants.map(
                   (variant) => html`
-                    <div class="panel" style="${chosen?.variant === variant.variant ? 'border-color:var(--brand);box-shadow:0 0 0 1px var(--brand)' : ''}">
+                    <div class="variant ${chosen?.variant === variant.variant ? 'is-chosen' : ''}">
                       <div class="split" style="justify-content:space-between">
                         <h3 style="margin:0">${variant.label}</h3>
                         ${chosen?.variant === variant.variant ? html`<span class="tag tag-ok">Valið</span>` : ''}
                       </div>
                       <p class="small muted">${variant.description}</p>
-                      <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff;height:340px">
+                      <div class="variant-frame">
                         <iframe src="/forskodun/${tenant.id}/${variant.variant}"
                                 title="Forskoðun — ${variant.label}"
-                                style="width:200%;height:200%;border:0;transform:scale(.5);transform-origin:0 0"
                                 loading="lazy" sandbox="allow-scripts"></iframe>
                       </div>
                       <div class="btn-row" style="margin-top:.85rem">
@@ -1280,13 +1286,30 @@ function numberField(name: string, label: string, value: number, min: number, ma
 
 function loginPage(next: string, error: string | null): SafeHtml {
   return page(
-    { title: 'Innskráning', session: null },
+    { title: 'Innskráning', session: null, bare: true },
     html`
-      <div style="max-width:24rem;margin:8vh auto 0">
-        <div class="panel">
-          <h1 style="text-align:center">Rafræn Þjónusta</h1>
-          <p class="sub muted" style="text-align:center;margin-bottom:1.5rem">Stjórnborð</p>
-          ${error ? html`<div class="flash flash-villa">${error}</div>` : ''}
+      <div class="auth-shell">
+        <div class="auth-brand">
+          <div class="auth-mark">RÞ</div>
+          <h1>Rafræn Þjónusta</h1>
+          <p>
+            Stjórnborð fyrir stafræna þjónustu við íslensk smáfyrirtæki —
+            vefsíður, bókanir, tölvupóst og símsvörun.
+          </p>
+          <ul class="auth-points">
+            <li><strong>Vefsíður</strong> — þrjár tillögur, þú velur</li>
+            <li><strong>Bókanir</strong> — spurningaflæði eftir fagi</li>
+            <li><strong>Tölvupóstur</strong> — DNS-færslur og eftirlit</li>
+            <li><strong>Símsvörun</strong> — svarar á íslensku</li>
+          </ul>
+        </div>
+
+        <div class="auth-card">
+          <h2>Innskráning</h2>
+          <p class="muted">Sláðu inn aðganginn þinn til að halda áfram.</p>
+
+          ${error ? html`<div class="flash flash-villa">${icon('M12 8v5M12 16.5v.5M10.3 3.9 2.6 17.2A2 2 0 0 0 4.3 20h15.4a2 2 0 0 0 1.7-2.8L13.7 3.9a2 2 0 0 0-3.4 0z', 18)}<span>${error}</span></div>` : ''}
+
           <form method="post" action="/innskraning">
             <input type="hidden" name="next" value="${next}">
             <div class="field">
@@ -1297,8 +1320,13 @@ function loginPage(next: string, error: string | null): SafeHtml {
               <label for="lykilord">Lykilorð</label>
               <input id="lykilord" name="lykilord" type="password" autocomplete="current-password" required>
             </div>
-            <button class="btn btn-primary" type="submit" style="width:100%">Skrá inn</button>
+            <button class="btn btn-primary btn-block" type="submit">Skrá inn</button>
           </form>
+
+          <p class="auth-foot">
+            Gögnin þín eru geymd á þessari tölvu. Ekkert fer í skýið nema það
+            sem þú tengir sjálf/ur.
+          </p>
         </div>
       </div>`,
   );
@@ -1355,10 +1383,33 @@ function taskPayload(tenantId: string, key: string, payload: Record<string, unkn
   return html``;
 }
 
-/** The onboarding wizard: one page, sensible defaults, everything editable later. */
+/**
+ * The onboarding wizard: one page, sensible defaults, everything editable later.
+ *
+ * Both the staff list and the capacity input are rendered up front and toggled
+ * client-side by the trade selector. The obvious alternative — re-submitting
+ * the form when the trade changes — throws away everything already typed and
+ * greets the operator with validation errors for fields they have not reached
+ * yet, so it is worth the twenty lines of inline script to avoid.
+ */
 function wizardForm(ctx: RequestContext, values: Record<string, string>, errors: Record<string, string>): SafeHtml {
-  const industry = values.fag ?? 'hargreidslustofa';
-  const preset = industryPreset(industry);
+  const selected = values.fag ?? 'hargreidslustofa';
+  const firstRender = values.nafn === undefined;
+  const checked = ctx.formList('eiginleikar');
+
+  /** Per-trade facts the inline script uses to update the live summary. */
+  const facts = Object.fromEntries(
+    INDUSTRIES.map((entry) => [
+      entry.key,
+      {
+        label: entry.label,
+        staffled: entry.staffled,
+        thjonustur: entry.services.length,
+        spurningar: flowSummary(entry.key).total,
+        starfsheiti: entry.defaultStaffTitle,
+      },
+    ]),
+  );
 
   const field = (name: string, label: string, options: { type?: string; help?: string; placeholder?: string } = {}) => html`
     <div class="field">
@@ -1377,21 +1428,23 @@ function wizardForm(ctx: RequestContext, values: Record<string, string>, errors:
       </div>
     </div>
 
-    <form method="post" action="/vidskiptavinir/nyr">
+    <form method="post" action="/vidskiptavinir/nyr" id="wizard">
       ${csrfField(ctx.session)}
 
       <div class="grid grid-2">
         <div class="panel">
           <h2>1 · Fyrirtækið</h2>
           ${field('nafn', 'Nafn fyrirtækis', { placeholder: 'Hárstofan Ösp' })}
+
           <div class="field">
             <label for="fag">Fag</label>
-            <select id="fag" name="fag" onchange="this.form.submit()">
+            <select id="fag" name="fag">
               ${INDUSTRIES.map((entry) => html`
-                <option value="${entry.key}" ${entry.key === industry ? 'selected' : ''}>${entry.emoji} ${entry.label}</option>`)}
+                <option value="${entry.key}" ${entry.key === selected ? 'selected' : ''}>${entry.emoji} ${entry.label}</option>`)}
             </select>
             <p class="help">Ræður þjónustulista, opnunartíma, spurningaflæði og útlitstillögum.</p>
           </div>
+
           ${field('kennitala', 'Kennitala', { placeholder: '000000-0000' })}
           ${field('netfang', 'Netfang', { type: 'email' })}
           ${field('simi', 'Símanúmer', { placeholder: '555 1234' })}
@@ -1399,6 +1452,7 @@ function wizardForm(ctx: RequestContext, values: Record<string, string>, errors:
           ${field('heimilisfang', 'Heimilisfang')}
           ${field('postnumer', 'Póstnúmer', { placeholder: '101' })}
           ${field('litur', 'Einkennislitur', { placeholder: '#1d4ed8', help: 'Notaður á vefsíðunni og í tölvupósti.' })}
+
           <div class="field">
             <label for="lysing">Lýsing á fyrirtækinu</label>
             <textarea id="lysing" name="lysing" rows="4"
@@ -1414,7 +1468,7 @@ function wizardForm(ctx: RequestContext, values: Record<string, string>, errors:
               ${FEATURES.map((feature) => html`
                 <label class="check">
                   <input type="checkbox" name="eiginleikar" value="${feature}"
-                         ${values.nafn === undefined || ctx.formList('eiginleikar').includes(feature) ? 'checked' : ''}>
+                         ${firstRender || checked.includes(feature) ? 'checked' : ''}>
                   <span><strong>${FEATURE_LABELS[feature].label}</strong><span>${FEATURE_LABELS[feature].description}</span></span>
                 </label>`)}
             </div>
@@ -1422,20 +1476,20 @@ function wizardForm(ctx: RequestContext, values: Record<string, string>, errors:
 
           <div class="panel" style="margin-top:1rem">
             <h2>3 · Um reksturinn</h2>
-            ${preset.staffled
-              ? html`
-                <div class="field">
-                  <label for="starfsfolk">Starfsfólk sem tekur bókanir</label>
-                  <textarea id="starfsfolk" name="starfsfolk" rows="4" placeholder="Eitt nafn í hverri línu">${values.starfsfolk ?? ''}</textarea>
-                  <p class="help">Hver fær sitt eigið dagatal og lausa tíma. Má sleppa og bæta við síðar.</p>
-                </div>`
-              : html`
-                <div class="field">
-                  <label for="afkastageta">Hversu mörg verk geta verið í gangi samtímis?</label>
-                  <input id="afkastageta" name="afkastageta" type="number" min="1" max="20"
-                         value="${values.afkastageta ?? '2'}">
-                  <p class="help">Til dæmis fjöldi lyfta á verkstæði eða vinnuborða á stofu.</p>
-                </div>`}
+
+            <div class="field" data-when="staffled">
+              <label for="starfsfolk">Starfsfólk sem tekur bókanir</label>
+              <textarea id="starfsfolk" name="starfsfolk" rows="4"
+                        placeholder="Eitt nafn í hverri línu">${values.starfsfolk ?? ''}</textarea>
+              <p class="help">Hver fær sitt eigið dagatal og lausa tíma. Má sleppa og bæta við síðar.</p>
+            </div>
+
+            <div class="field" data-when="pool">
+              <label for="afkastageta">Hversu mörg verk geta verið í gangi samtímis?</label>
+              <input id="afkastageta" name="afkastageta" type="number" min="1" max="20"
+                     value="${values.afkastageta ?? '2'}">
+              <p class="help">Til dæmis fjöldi lyfta á verkstæði eða vinnuborða á stofu.</p>
+            </div>
 
             <div class="field">
               <label for="postthjonusta">Póstþjónusta</label>
@@ -1455,10 +1509,10 @@ function wizardForm(ctx: RequestContext, values: Record<string, string>, errors:
 
           <div class="panel" style="margin-top:1rem">
             <h3>Þetta verður búið til</h3>
-            <ul class="small muted">
-              <li><strong>${preset.services.length}</strong> þjónustur með verði og tímalengd</li>
-              <li>Opnunartími fyrir ${preset.label.toLowerCase()}</li>
-              <li>Spurningaflæði með <strong>${flowSummary(industry).total}</strong> spurningum</li>
+            <ul class="auth-points" style="margin-top:.9rem">
+              <li><strong data-fact="thjonustur"></strong> þjónustur með verði og tímalengd</li>
+              <li>Opnunartími fyrir <strong data-fact="label"></strong></li>
+              <li>Spurningaflæði með <strong data-fact="spurningar"></strong> spurningum</li>
               <li>Þrjár fullbúnar útlitstillögur að vefsíðu</li>
               <li>Verkefnalisti með því sem þarf að klára handvirkt</li>
             </ul>
@@ -1470,5 +1524,31 @@ function wizardForm(ctx: RequestContext, values: Record<string, string>, errors:
         <button class="btn btn-primary" type="submit">Stofna og setja upp</button>
         <a class="btn btn-ghost" href="/vidskiptavinir">Hætta við</a>
       </div>
-    </form>`;
+    </form>
+
+    <script>
+      (function () {
+        var facts = ${jsonScript(facts)};
+        var select = document.getElementById('fag');
+        var form = document.getElementById('wizard');
+
+        function apply() {
+          var entry = facts[select.value];
+          if (!entry) return;
+
+          form.querySelectorAll('[data-when="staffled"]').forEach(function (node) {
+            node.hidden = !entry.staffled;
+          });
+          form.querySelectorAll('[data-when="pool"]').forEach(function (node) {
+            node.hidden = entry.staffled;
+          });
+          form.querySelectorAll('[data-fact]').forEach(function (node) {
+            node.textContent = entry[node.getAttribute('data-fact')];
+          });
+        }
+
+        select.addEventListener('change', apply);
+        apply();
+      })();
+    </script>`;
 }

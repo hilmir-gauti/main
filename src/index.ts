@@ -57,7 +57,9 @@ export async function main(): Promise<void> {
   openDatabase();
   logger.info('Gagnagrunnur opnaður', { path: config.databasePath, schema: schemaVersion() });
 
-  if (operatorCount() === 0) {
+  if (operatorCount() === 0 && process.env.RTH_EMBEDDED !== '1') {
+    // The desktop build points the browser at /uppsetning instead, so this
+    // terminal-specific advice would be misleading there.
     logger.warn('Enginn stjórnandi er skráður. Keyrðu `npm run setup` til að stofna aðgang.');
   }
 
@@ -97,8 +99,19 @@ export async function main(): Promise<void> {
   });
 }
 
-// Only auto-start when executed directly, so tests can import this module.
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop() ?? '')) {
+/**
+ * Auto-start only when this module is the process entry point.
+ *
+ * `RTH_EMBEDDED` is set by the desktop launcher, which drives the lifecycle
+ * itself, and the check is skipped entirely under the test runner so importing
+ * this module never binds a port.
+ */
+const isEntryPoint =
+  process.env.RTH_EMBEDDED !== '1' &&
+  Boolean(process.argv[1]) &&
+  /(?:^|[\\/])index\.(?:js|ts)$/.test(process.argv[1]!);
+
+if (isEntryPoint) {
   void main().catch((error) => {
     logger.error('Ræsing mistókst', { error });
     process.exit(1);

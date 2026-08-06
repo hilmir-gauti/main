@@ -158,7 +158,10 @@ export function validateConfig(): string[] {
     problems.push('APP_SECRET er of stutt — notaðu að minnsta kosti 32 stafi.');
   }
 
-  if (config.isProduction && !config.baseUrl.startsWith('https://')) {
+  // Loopback is exempt: the packaged desktop build serves the console to the
+  // machine it runs on, where plain HTTP never crosses a network boundary and
+  // browsers reject Secure cookies anyway.
+  if (config.isProduction && !config.baseUrl.startsWith('https://') && !isLoopback(config.baseUrl)) {
     problems.push('BASE_URL verður að nota https:// í rekstri (session-kökur eru merktar Secure).');
   }
 
@@ -177,6 +180,25 @@ export function validateConfig(): string[] {
   }
 
   return problems;
+}
+
+/** True when a URL points at this machine, e.g. the desktop build. */
+export function isLoopback(url: string): boolean {
+  try {
+    const host = new URL(url).hostname;
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether session cookies should carry the `Secure` flag. Setting it on a
+ * plain-HTTP loopback origin makes the browser drop the cookie entirely, which
+ * would silently break login in the desktop build.
+ */
+export function useSecureCookies(): boolean {
+  return config.baseUrl.startsWith('https://');
 }
 
 /** Human-readable integration status, shown on the admin dashboard. */
