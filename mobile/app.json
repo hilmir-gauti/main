@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "Rafræn Þjónusta",
+    "slug": "rafraen-thjonusta",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "scheme": "rafraen",
+    "splash": {
+      "backgroundColor": "#1d4ed8",
+      "resizeMode": "contain"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "is.rafraenthjonusta.app",
+      "infoPlist": {
+        "CFBundleAllowMixedLocalizations": true,
+        "UIBackgroundModes": ["remote-notification"]
+      }
+    },
+    "android": {
+      "package": "is.rafraenthjonusta.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#1d4ed8"
+      },
+      "permissions": ["POST_NOTIFICATIONS"]
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "color": "#1d4ed8"
+        }
+      ]
+    ],
+    "extra": {
+      "//": "Set this to the public URL of your Rafræn Þjónusta server.",
+      "apiBase": "https://stjornbord.example.is"
+    }
+  }
+}

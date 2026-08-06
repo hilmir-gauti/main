@@ -1,0 +1,12 @@
+node_modules/
+dist/
+data/
+.env
+.env.local
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.DS_Store
+*.log
+mobile/node_modules/
+mobile/.expo/

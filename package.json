@@ -1,0 +1,23 @@
+{
+  "name": "rafraen-thjonusta",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Rafræn Þjónusta — stjórnborð fyrir stafræna þjónustu við íslensk smáfyrirtæki (vefir, bókanir, tölvupóstur, símsvörun).",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node --experimental-sqlite dist/index.js",
+    "dev": "node --experimental-sqlite --experimental-strip-types --watch src/index.ts",
+    "test": "node --experimental-sqlite --experimental-strip-types --test tests/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "seed": "node --experimental-sqlite --experimental-strip-types src/scripts/seed.ts",
+    "setup": "node --experimental-sqlite --experimental-strip-types src/scripts/setup.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
