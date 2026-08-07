@@ -39,9 +39,21 @@ gagnagrunnur að setja upp, engin skipanalína.
 Til að smíða keyrsluskrána sjálf/ur:
 
 ```bash
-npm install
+npm install          # nauðsynlegt — smíðaverkfærin eru devDependencies
 npm run exe          # Windows .exe í dist-exe/
 npm run exe:all      # Windows, macOS og Linux
+```
+
+`npm install` verður að keyra fyrst, og aftur eftir hvert `git pull` sem bætir
+við verkfærum. Sleppirðu því segir smíðin þér það beint.
+
+Skriptið sækir Node-keyrsluumhverfi sem passar við þína Node-útgáfu (blobið og
+keyrsluumhverfið verða að vera sama útgáfa). Keyrirðu Node-útgáfu sem er ekki
+gefin út á nodejs.org — t.d. næturútgáfu — veldu aðra:
+
+```bash
+set RTH_NODE_VERSION=v22.14.0 && npm run exe     # Windows
+RTH_NODE_VERSION=v22.14.0 npm run exe            # macOS/Linux
 ```
 
 Gögnin þín eru geymd hjá þér:

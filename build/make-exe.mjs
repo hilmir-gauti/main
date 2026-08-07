@@ -26,8 +26,6 @@ import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 
-import * as esbuild from 'esbuild';
-
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = join(root, 'dist-exe');
 const workDir = join(outDir, '.vinna');
@@ -86,10 +84,62 @@ function humanSize(bytes) {
 }
 
 // ---------------------------------------------------------------------------
+// Preflight
+// ---------------------------------------------------------------------------
+
+/**
+ * Loads the build-time dependencies, translating Node's raw
+ * ERR_MODULE_NOT_FOUND into instructions. This script is usually the first
+ * thing someone runs after cloning or pulling, which is exactly when
+ * node_modules is missing or out of date.
+ */
+async function loadTools() {
+  const missing = [];
+
+  let esbuild = null;
+  try {
+    esbuild = await import('esbuild');
+  } catch {
+    missing.push('esbuild');
+  }
+
+  const postject = join(root, 'node_modules', 'postject', 'dist', 'cli.js');
+  if (!existsSync(postject)) missing.push('postject');
+
+  if (missing.length > 0) {
+    log('');
+    log('  Smíðaverkfæri vantar: ' + missing.join(', '));
+    log('');
+    log('  Keyrðu þetta fyrst:');
+    log('');
+    log('      npm install');
+    log('');
+    log('  (Þessi verkfæri eru devDependencies — þau eru aðeins notuð til að');
+    log('   smíða keyrsluskrána og fylgja ekki með í henni.)');
+    log('');
+    process.exit(1);
+  }
+
+  return { esbuild, postject };
+}
+
+/** Node must be new enough to have the single-executable API. */
+function checkNodeVersion() {
+  const major = Number(process.versions.node.split('.')[0]);
+  if (major < 20) {
+    log('');
+    log(`  Node ${process.version} er of gömul til að smíða keyrsluskrá.`);
+    log('  Node 20 eða nýrri þarf (og 22.5+ til að keyra kerfið sjálft).');
+    log('');
+    process.exit(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 1. Bundle
 // ---------------------------------------------------------------------------
 
-async function bundle() {
+async function bundle(esbuild) {
   const outfile = join(workDir, 'rafraen.cjs');
 
   await esbuild.build({
@@ -154,6 +204,29 @@ async function download(url, destination) {
 
   log(`    Sæki ${url}`);
   const response = await fetch(url);
+
+  if (response.status === 404) {
+    // Almost always means the local Node is a version nodejs.org does not
+    // publish a build for (a nightly, an RC, or a distro-patched build).
+    throw new Error(
+      [
+        `Fann ekki Node ${NODE_VERSION} á nodejs.org.`,
+        '',
+        `  Þú keyrir Node ${process.version}, og keyrsluskráin verður að nota`,
+        '  sömu útgáfu. Veldu útgáfu sem er til á nodejs.org/dist, t.d.:',
+        '',
+        '      npx cross-env RTH_NODE_VERSION=v22.14.0 npm run exe',
+        '',
+        '  eða á Windows:',
+        '',
+        '      set RTH_NODE_VERSION=v22.14.0 && npm run exe',
+        '',
+        '  Athugið: blobið er búið til af Node-inu sem keyrir þetta skript, svo',
+        '  útgáfan sem valin er þarf að vera sú sama og þín (eða mjög nálæg).',
+      ].join('\n'),
+    );
+  }
+
   if (!response.ok || !response.body) {
     throw new Error(`Niðurhal mistókst (${response.status}) — ${url}`);
   }
@@ -181,7 +254,7 @@ async function fetchRuntime(target, key) {
   return extracted;
 }
 
-async function inject(target, key, blobPath) {
+async function inject(target, key, blobPath, postject) {
   const runtime = await fetchRuntime(target, key);
   const output = join(outDir, target.output);
 
@@ -190,7 +263,6 @@ async function inject(target, key, blobPath) {
 
   // postject ships a CLI; running it through the local install avoids
   // depending on a global npx cache.
-  const postject = join(root, 'node_modules', 'postject', 'dist', 'cli.js');
   execFileSync(
     process.execPath,
     [
@@ -212,6 +284,9 @@ async function inject(target, key, blobPath) {
 // ---------------------------------------------------------------------------
 
 async function run() {
+  checkNodeVersion();
+  const { esbuild, postject } = await loadTools();
+
   const argIndex = process.argv.indexOf('--target');
   const requested = argIndex >= 0 ? process.argv[argIndex + 1] : hostTarget();
 
@@ -235,7 +310,7 @@ async function run() {
 
   const total = 2 + keys.length;
   step(1, total, 'Bundla forritið í eina skrá');
-  const entryFile = await bundle();
+  const entryFile = await bundle(esbuild);
 
   step(2, total, 'Búa til SEA-blob');
   const blobPath = buildBlob(entryFile);
@@ -243,7 +318,7 @@ async function run() {
   const built = [];
   for (const [index, key] of keys.entries()) {
     step(3 + index, total, `Smíða keyrsluskrá — ${TARGETS[key].label}`);
-    built.push(await inject(TARGETS[key], key, blobPath));
+    built.push(await inject(TARGETS[key], key, blobPath, postject));
   }
 
   writeFileSync(join(outDir, 'LESTU-MIG.txt'), readmeText(), 'utf8');
