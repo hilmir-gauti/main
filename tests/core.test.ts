@@ -20,6 +20,7 @@ import {
   hhmmToMinutes, instantFromWallClock, minutesToHhmm, plainDateOf, weekdayNameIs, weekdayOf,
 } from '../src/core/time.ts';
 import { escapeHtml, html, raw } from '../src/core/html.ts';
+import { looksUnexpanded } from '../src/config.ts';
 import { slugify } from '../src/core/ids.ts';
 import { buildMessage, encodeHeaderValue } from '../src/integrations/email/smtp.ts';
 import { checkSmtpSettings, diagnoseSmtpError } from '../src/integrations/email/diagnose.ts';
@@ -370,6 +371,26 @@ describe('SMTP-skeytasmíði', () => {
     );
     // The body is base64-encoded, so a bare "." can never terminate DATA early.
     assert.match(message, /Content-Transfer-Encoding: base64/);
+  });
+});
+
+describe('greining á óútvíkkuðum skeljaskipunum', () => {
+  // The exact string Fly.io receives when a Windows shell is handed the bash
+  // one-liner from the README. It is 23 characters, so it fails the length
+  // check, and the length alone does not explain why.
+  const UNEXPANDED = '$(openssl rand -hex 32)';
+
+  it('þekkir bash-skipun sem skelin víkkaði ekki út', () => {
+    assert.ok(looksUnexpanded(UNEXPANDED));
+    assert.ok(looksUnexpanded('${APP_SECRET}'));
+    assert.ok(looksUnexpanded('%APP_SECRET%'));
+    assert.ok(looksUnexpanded('`openssl rand -hex 32`'));
+  });
+
+  it('kallar ekki alvöru leyndarmál skipun', () => {
+    // A real secret is hex or base64; neither carries shell punctuation.
+    assert.equal(looksUnexpanded('a3f9c1e07b2d48569af0c3e1b7d29f04'), false);
+    assert.equal(looksUnexpanded('kJ8x+Qz/1aBcDeFgHiJkLmNoPqRsTuVwXyZ0123='), false);
   });
 });
 

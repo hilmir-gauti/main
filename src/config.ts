@@ -249,6 +249,21 @@ export type Config = typeof config;
  * Fails fast on configuration that is unsafe in production. Development keeps
  * working with generated stand-ins so `npm start` never blocks on setup.
  */
+/**
+ * Whether a value looks like a shell command the shell never ran.
+ *
+ * `fly secrets set APP_SECRET="$(openssl rand -hex 32)"` is correct in bash and
+ * silently wrong in CMD and PowerShell, which pass the text through verbatim.
+ * Nothing downstream notices — the value is simply a short, fixed string — so
+ * the check happens here, where the length is already being questioned.
+ *
+ * Random secrets are hex or base64 and carry none of this punctuation, so the
+ * test cannot fire on a real value.
+ */
+export function looksUnexpanded(value: string): boolean {
+  return /^[$%`]|\$\(|\$\{|%[A-Za-z_]+%/.test(value);
+}
+
 export function validateConfig(): string[] {
   const problems: string[] = [];
 
@@ -257,7 +272,20 @@ export function validateConfig(): string[] {
       problems.push('APP_SECRET vantar — settu langan tilviljanakenndan streng (openssl rand -hex 32).');
     }
   } else if (config.appSecret.length < 32 && config.isProduction) {
-    problems.push('APP_SECRET er of stutt — notaðu að minnsta kosti 32 stafi.');
+    // The length is safe to log and is the whole diagnosis: a value that is
+    // present but short almost always means the shell did not expand what was
+    // typed, which is silent everywhere except here.
+    problems.push(
+      `APP_SECRET er of stutt (${config.appSecret.length} stafir) — notaðu að minnsta kosti 32.`,
+    );
+
+    if (looksUnexpanded(config.appSecret)) {
+      problems.push(
+        'APP_SECRET lítur út eins og óútvíkkuð skipun úr skel. `$(...)` virkar í bash en ekki í ' +
+        'Windows-skel — búðu til gildið fyrst og límdu það svo inn: ' +
+        'node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"',
+      );
+    }
   }
 
   // Loopback is exempt: the packaged desktop build serves the console to the

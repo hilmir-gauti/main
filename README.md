@@ -115,9 +115,20 @@ svara og áminningar að fara út á nóttunni þarf kerfið að vera á netþj�
 ```bash
 fly launch --no-deploy --copy-config
 fly volumes create rafraen_gogn --size 3 --region lhr
-fly secrets set APP_SECRET="$(openssl rand -hex 32)"
 fly deploy
 ```
+
+`APP_SECRET` þarf að setja á milli. Búðu gildið til í tveimur skrefum frekar en
+einu — `$(...)` er bash-skipun sem Windows-skel víkkar ekki út, heldur sendir
+áfram sem texta, og þá stöðvast ræsingin á of stuttu leyndarmáli:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+fly secrets set APP_SECRET=<límdu gildið hér>
+```
+
+Þetta virkar eins í CMD, PowerShell og bash. Leyndarmálið afkóðar geymd
+aðgangsorð og OAuth-teikn, svo geymdu það — breytist það verða þau ólæsileg.
 
 Breyttu `BASE_URL` í `fly.toml` í raunverulega slóðina áður en þú keyrir
 `fly deploy` — Google-innskráning, Twilio-vefkrókar og bókunartenglar eru allir
