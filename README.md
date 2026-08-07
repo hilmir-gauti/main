@@ -314,10 +314,23 @@ birta hana á hraðneti og að hún opnist hratt á síma yfir 4G.
 
 Innan þeirra marka er þetta í síðunum:
 
-- **Fljótandi haus** sem þéttist og fær móðugler þegar skrunað er.
-- **Hreyfður bakgrunnur í hetjunni** og fagbundið mynstur — flæðandi þræðir
-  fyrir stofur, hringir fyrir verkstæði, hornréttar lagnir fyrir iðnaðarmenn,
-  púlslína fyrir heilsu.
+- **Stórt leturmál með karakter.** Engar vefletur eru sóttar, svo karakterinn
+  kemur úr því hvernig kerfisletrið er stillt: þungar þyngdir, þétt stafabil og
+  línuhæð undir 1 í fyrirsögnum. Fyrirsögnin er fyllt með litstigli.
+- **Filmukorn** yfir alla síðuna. Þetta er ódýrasta bragðið í skránni og það
+  sem gerir mest: stórir sléttir litstiglar lesast sem sniðmát af því að
+  raunverulegir fletir eru aldrei fullkomlega sléttir.
+- **Möskvabakgrunnur í hetjunni** — nokkrir hliðraðir geislastiglar sem gefa
+  dýpt sem línulegur stigull gerir aldrei — og fagbundið mynstur: flæðandi
+  þræðir fyrir stofur, hringir fyrir verkstæði, hornréttar lagnir fyrir
+  iðnaðarmenn, púlslína fyrir heilsu.
+- **Fljótandi haus** sem þéttist og fær móðugler, með lestrarrönd efst.
+- **Þjónusturæma** sem líður hjá í fullri breidd. Hún segir ekkert nýtt —
+  hlutverkið er taktur, því annars er síðan einn lóðréttur dálkur af köflum.
+- **Dökkur bókunarkafli** í fullri breidd. Bókunin er ástæða síðunnar og fær
+  sína eigin þyngd; bókunarviðmótið sjálft situr á ljósu spjaldi ofan á honum.
+- **Númeruð þjónustuspjöld** með kastljósi sem eltir músina.
+- **Tölur teljast upp** þegar þær koma í sýn.
 - **Efni birtist við skrun**, með stigvaxandi töf innan hvers kafla.
 - **Fastur bókunarborði** neðst á símum þegar hetjan er skrunuð úr sýn.
 - **Algengar spurningar** svaraðar úr raunverulegum stillingum viðskiptavinarins

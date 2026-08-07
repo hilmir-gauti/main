@@ -98,13 +98,64 @@ export function heroMotif(template: string, palette: Palette): string {
 }
 
 /**
+ * Film grain.
+ *
+ * A single SVG turbulence tile, inlined as a data URI and tiled over the page
+ * at very low opacity. This is the cheapest trick in the file and the one that
+ * does the most work: large flat gradients read as "template" because real
+ * printed and photographed surfaces are never perfectly smooth, and a few
+ * percent of noise is enough to break that.
+ */
+const GRAIN = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.42'/%3E%3C/svg%3E")`;
+
+/**
  * Shared motion and layout CSS, appended after the variant's own rules so a
  * variant can still override anything here.
  */
 export function motionStyles(palette: Palette): string {
   return `
+/* --- Display typography ----------------------------------------------
+   No web fonts are loaded, so character has to come from how the system
+   stack is set rather than from which font it is: heavy weights, tight
+   tracking, and a line height under 1 at display sizes. */
+.hero h1{font-size:clamp(2.6rem,7.5vw,5.5rem);font-weight:850;letter-spacing:-.045em;
+  line-height:.95;text-wrap:balance}
+.hero .lead{font-size:clamp(1.1rem,1.9vw,1.4rem);max-width:36ch;line-height:1.45;text-wrap:pretty}
+h2{letter-spacing:-.035em;font-weight:800;font-size:clamp(1.9rem,4.2vw,3rem);text-wrap:balance}
+.eyebrow{font-size:.72rem;letter-spacing:.18em}
+
+/* The headline is filled with a gradient where that is supported. The colour
+   is set first so an unsupporting browser shows solid ink rather than
+   nothing: color:transparent with no background-clip is invisible text. */
+.hero h1{color:inherit}
+@supports ((-webkit-background-clip:text) or (background-clip:text)){
+  .hero-midja h1,.hero-mynd h1{
+    background:linear-gradient(115deg,var(--ink) 0%,var(--ink) 25%,var(--brand) 78%,var(--brand-dark) 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero-skipt h1{
+    background:linear-gradient(115deg,#fff 0%,#fff 40%,color-mix(in srgb,var(--brand) 60%,#fff) 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+}
+
+/* --- Grain ------------------------------------------------------------ */
+.grain{position:fixed;inset:0;z-index:60;pointer-events:none;opacity:.035;
+  background-image:${GRAIN};background-size:140px 140px;mix-blend-mode:overlay}
+@media (prefers-color-scheme:dark){.grain{opacity:.055}}
+
+/* --- Reading progress ------------------------------------------------- */
+.progress{position:fixed;top:0;left:0;height:2px;width:0;z-index:70;
+  background:linear-gradient(90deg,var(--brand),var(--brand-dark));
+  box-shadow:0 0 12px color-mix(in srgb,var(--brand) 70%,transparent)}
+
 /* --- Layered hero backdrop ------------------------------------------- */
 .hero{position:relative;isolation:isolate}
+/* A mesh of off-centre radial gradients reads as depth in a way a linear
+   gradient never does. */
+.hero::before{content:'';position:absolute;inset:0;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(60% 50% at 12% 18%,color-mix(in srgb,var(--brand) 26%,transparent),transparent 70%),
+    radial-gradient(45% 45% at 88% 12%,color-mix(in srgb,var(--brand-dark) 22%,transparent),transparent 70%),
+    radial-gradient(55% 60% at 70% 92%,color-mix(in srgb,var(--brand) 18%,transparent),transparent 70%)}
 /* The aura sits above the hero's own background but below its copy, so it is
    visible on the dark split hero as well as on the light ones. */
 .hero-aura{position:absolute;inset:0;z-index:0;overflow:hidden;pointer-events:none}
@@ -122,6 +173,14 @@ export function motionStyles(palette: Palette): string {
 .hero .wrap,.hero-grid,.hero-copy,.hero-inner{position:relative;z-index:1}
 
 .btn-sm{padding:.55rem 1.05rem;font-size:.92rem}
+
+/* A phone number is never worth breaking across lines; below that the two
+   hero buttons stack full width rather than squeezing side by side. */
+.hero-actions .btn{white-space:nowrap}
+@media (max-width:560px){
+  .hero-actions{flex-direction:column;align-items:stretch}
+  .hero-actions .btn{width:100%}
+}
 
 /* Anchor targets must clear the sticky header, or a nav click lands with the
    heading hidden underneath it. */
@@ -161,10 +220,65 @@ export function motionStyles(palette: Palette): string {
 /* --- Scroll reveal ---------------------------------------------------- */
 .reveal{opacity:1}
 
+/* --- Section rhythm ---------------------------------------------------
+   Every section being the same white block is what makes a generated page
+   read as a template. One full-bleed dark section breaks the run and gives
+   the booking step — the thing the page exists for — its own weight. */
+.section-dark{background:var(--ink);color:#fff;border-top:0;position:relative;overflow:hidden}
+.section-dark::before{content:'';position:absolute;inset:0;pointer-events:none;
+  background:
+    radial-gradient(50% 60% at 15% 0%,color-mix(in srgb,var(--brand) 40%,transparent),transparent 70%),
+    radial-gradient(45% 70% at 95% 100%,color-mix(in srgb,var(--brand-dark) 35%,transparent),transparent 70%)}
+.section-dark>*{position:relative;z-index:1}
+.section-dark h2{color:#fff}
+.section-dark .section-title p{color:rgba(255,255,255,.66)}
+/* The booking widget brings its own light palette and inherits text colour in
+   places, so it gets a light card rather than the section's white-on-dark
+   context — otherwise its option labels come out white on white. */
+.section-dark .booking-shell{background:var(--surface);color:var(--ink);
+  border-color:transparent;box-shadow:0 40px 80px -40px rgba(2,6,23,.8)}
+
+/* --- Marquee ----------------------------------------------------------
+   A full-bleed band of what the business actually does. It carries no
+   information the page does not already have; its job is to interrupt the
+   column of centred sections with something horizontal. */
+.marquee{overflow:hidden;border-block:1px solid var(--border);
+  background:var(--surface-alt);padding-block:1.05rem;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent);
+  mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent)}
+.marquee-track{display:flex;width:max-content}
+.marquee-run{display:flex;align-items:center}
+.marquee-run span{display:inline-flex;align-items:center;gap:2.4rem;white-space:nowrap;
+  padding-right:2.4rem;font-size:clamp(1rem,1.8vw,1.35rem);font-weight:750;
+  letter-spacing:-.025em;color:var(--muted)}
+.marquee-run span::after{content:'';width:7px;height:7px;border-radius:50%;
+  background:var(--brand);flex:none}
+
 /* --- Cards and rows --------------------------------------------------- */
 .service-card,.service-item{position:relative;transition:transform .22s ease,box-shadow .22s ease,
-  border-color .22s ease}
+  border-color .22s ease;overflow:hidden}
 .service-card:hover,.service-item:hover{border-color:color-mix(in srgb,var(--brand) 45%,var(--border))}
+
+/* A soft light that follows the pointer. Purely decorative, and it costs one
+   custom property per card rather than a repaint. */
+.service-card::before{content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  opacity:0;transition:opacity .3s ease;
+  background:radial-gradient(260px circle at var(--mx,50%) var(--my,50%),
+    color-mix(in srgb,var(--brand) 18%,transparent),transparent 68%)}
+.service-card:hover::before{opacity:1}
+
+/* Numbering gives the list a spine and fills the space a photograph would. */
+.service-card{padding-top:2.9rem}
+.service-card .num{position:absolute;top:1.15rem;left:1.5rem;font-size:.78rem;font-weight:800;
+  letter-spacing:.1em;color:color-mix(in srgb,var(--brand) 75%,transparent);font-variant-numeric:tabular-nums}
+.service-card .price{font-size:1.35rem;letter-spacing:-.02em}
+
+.stat-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;
+  background:var(--border);border:1px solid var(--border);border-radius:var(--corner);overflow:hidden}
+.stat{background:var(--surface);padding:1.4rem 1.25rem;text-align:center}
+.stat strong{display:block;font-size:clamp(1.7rem,3.2vw,2.4rem);letter-spacing:-.04em;line-height:1;
+  font-weight:850;font-variant-numeric:tabular-nums}
+.stat span{font-size:.82rem;color:var(--muted);display:block;margin-top:.3rem}
 .stat-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;
   background:var(--border);border:1px solid var(--border);border-radius:var(--corner);overflow:hidden}
 .stat{background:var(--surface);padding:1.15rem 1.25rem;text-align:center}
@@ -247,10 +361,22 @@ html{scroll-behavior:auto}
 
   .cta-bar{transition:translate .35s cubic-bezier(.22,1,.36,1)}
   .cta-bar.is-in{translate:0 0}
+
+  /* The track holds two identical copies, so translating by exactly half its
+     width lands back on an identical frame and the loop is seamless. */
+  .marquee-track{animation:marquee 34s linear infinite}
+  .marquee:hover .marquee-track{animation-play-state:paused}
+  @keyframes marquee{to{transform:translateX(-50%)}}
+
+  /* Parallax on the motif, driven by a custom property the script sets. */
+  .motif{translate:0 calc(-50% + var(--par,0px))}
 }
 
 @media (prefers-reduced-motion: reduce){
   .cta-bar{translate:0 0}
+  /* Without animation the track would still be twice as wide as it needs to
+     be, so the duplicate is dropped rather than left hanging off-screen. */
+  .marquee-track>.marquee-run:nth-child(2){display:none}
 }
 `;
 }
@@ -269,15 +395,29 @@ export function motionScript(): string {
   var root = document.documentElement;
   var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  // Header state on scroll, cheap enough to run unconditionally.
   var nav = document.querySelector('.sitenav');
-  if (nav) {
-    var onScroll = function () {
-      nav.classList.toggle('is-stuck', window.scrollY > 8);
-    };
-    addEventListener('scroll', onScroll, { passive: true });
-    onScroll();
-  }
+  var progress = document.querySelector('.progress');
+  var motif = document.querySelector('.motif');
+
+  // One scroll listener for everything, and all the writing happens inside a
+  // single animation frame so a fast scroll cannot queue up layout thrash.
+  var ticking = false;
+  var onScroll = function () {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(function () {
+      var y = window.scrollY;
+      if (nav) nav.classList.toggle('is-stuck', y > 8);
+      if (progress) {
+        var max = document.documentElement.scrollHeight - innerHeight;
+        progress.style.width = (max > 0 ? Math.min(y / max, 1) * 100 : 0) + '%';
+      }
+      if (motif && !reduced && y < innerHeight) motif.style.setProperty('--par', (y * 0.12) + 'px');
+      ticking = false;
+    });
+  };
+  addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
 
   var bar = document.querySelector('.cta-bar');
   if (bar) {
@@ -307,6 +447,43 @@ export function motionScript(): string {
 
   document.querySelectorAll('.reveal, .reveal-stagger').forEach(function (node) {
     observer.observe(node);
+  });
+
+  // Pointer-following highlight. Coordinates go into custom properties so the
+  // gradient moves without touching layout.
+  document.querySelectorAll('.service-card').forEach(function (card) {
+    card.addEventListener('pointermove', function (event) {
+      var rect = card.getBoundingClientRect();
+      card.style.setProperty('--mx', (event.clientX - rect.left) + 'px');
+      card.style.setProperty('--my', (event.clientY - rect.top) + 'px');
+    });
+  });
+
+  // Counting up the stats. Only whole numbers are animated — "Strax" is a word
+  // and counting to it would be nonsense.
+  var counters = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      if (!entry.isIntersecting) return;
+      counters.unobserve(entry.target);
+
+      var node = entry.target;
+      var target = parseInt(node.textContent, 10);
+      if (!isFinite(target) || String(target) !== node.textContent.trim()) return;
+
+      var started = null;
+      var step = function (now) {
+        if (started === null) started = now;
+        var t = Math.min((now - started) / 900, 1);
+        // Ease out, so it decelerates into the final number.
+        node.textContent = String(Math.round(target * (1 - Math.pow(1 - t, 3))));
+        if (t < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+  }, { threshold: 0.6 });
+
+  document.querySelectorAll('.stat strong').forEach(function (node) {
+    counters.observe(node);
   });
 })();
 `;

@@ -99,8 +99,9 @@ function servicesSection(content: SiteContent, variant: Variant): SafeHtml {
     return html`
       <div class="grid grid-services">
         ${services.map(
-          (service) => html`
+          (service, index) => html`
             <article class="service-card">
+              <span class="num">${String(index + 1).padStart(2, '0')}</span>
               <h3>${service.name}</h3>
               ${service.description ? html`<p>${service.description}</p>` : ''}
               <div class="service-meta">
@@ -142,6 +143,33 @@ function servicesSection(content: SiteContent, variant: Variant): SafeHtml {
             <span class="price">${priceText(service)}</span>
           </div>`,
       )}
+    </div>`;
+}
+
+/**
+ * A moving band of what the business does.
+ *
+ * Built from the service names it already has, so it states nothing new — the
+ * job is rhythm. Every generated page is otherwise a stack of centred sections
+ * in a single column, and one horizontal element breaks that.
+ *
+ * The track holds the list twice: the animation translates by exactly half its
+ * width, which lands on an identical frame, so the loop has no seam.
+ */
+function marquee(content: SiteContent): SafeHtml {
+  const preset = industryPreset(content.tenant.industry);
+
+  const words = content.services.length >= 3
+    ? content.services.map((service) => service.name)
+    : [preset.label, ...content.services.map((service) => service.name)];
+
+  if (words.length < 3) return html``;
+
+  const run = html`<div class="marquee-run">${words.map((word) => html`<span>${word}</span>`)}</div>`;
+
+  return html`
+    <div class="marquee" aria-hidden="true">
+      <div class="marquee-track">${run}${run}</div>
     </div>`;
 }
 
@@ -479,6 +507,8 @@ ${raw(bookingWidgetStyles())}
 </style>
 </head>
 <body>
+<div class="grain" aria-hidden="true"></div>
+<div class="progress" aria-hidden="true"></div>
 ${options.previewNotice ? html`<div class="preview-banner">${options.previewNotice}</div>` : ''}
 
 <nav class="sitenav">
@@ -499,6 +529,8 @@ ${heroSection(content, variant, light)}
 <main>
   ${trustStrip(content)}
 
+  ${marquee(content)}
+
   ${content.services.length > 0
     ? html`
       <section class="section" id="thjonusta">
@@ -512,7 +544,7 @@ ${heroSection(content, variant, light)}
       </section>`
     : ''}
 
-  <section class="section" id="bokun">
+  <section class="section section-dark" id="bokun">
     <div class="wrap">
       <div class="section-title reveal">
         <h2>${preset.bookVerb}</h2>
