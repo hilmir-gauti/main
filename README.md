@@ -269,6 +269,43 @@ stöðvast aldrei vegna þess að gervigreind sé ekki tiltæk.
 
 ---
 
+## Uppfletting eftir kennitölu
+
+Í töfrasprotanum slærðu inn kennitölu fyrirtækisins og ýtir á **Sækja
+upplýsingar**. Reitirnir fyllast sjálfkrafa og hver þeirra er merktur þeim sem
+gaf gildið.
+
+| Uppruni | Reitir |
+|---|---|
+| **Fyrirtækjaskrá** (Skatturinn) | Nafn, heimilisfang, póstnúmer, fag (úr ÍSAT-flokkun). Auk þess rekstrarform, ÍSAT-númer og VSK-númer til staðfestingar |
+| **Lénaskrá** (ISNIC) | Lén, símanúmer, netfang |
+| **Gervigreind** | Lýsing á fyrirtækinu, samin úr staðreyndunum að ofan |
+
+Reitur sem þú hefur þegar fyllt út er aldrei yfirskrifaður.
+
+### Gervigreind flettir ekki upp
+
+Þetta er ástæðan fyrir uppruna-merkingunum. Spyrjirðu mállíkan „hvaða fyrirtæki
+er með kennitölu 5501234567“ þá svarar það — með trúverðugu nafni, trúverðugu
+símanúmeri og trúverðugu netfangi. Ekkert af því er flett upp; það er allt
+samið. Skáldað símanúmer sem endar á vefsíðu viðskiptavinar er símanúmer
+einhvers annars.
+
+Þess vegna er röðin: skrár fyrst, líkan á eftir, og aðeins í þann eina reit sem
+er raunverulegt ritverkefni. Finnist reitur hvergi stendur hann tómur og
+ástæðan er sögð berum orðum — hann er aldrei fylltur með ágiskun.
+
+### Eigandi léns er staðfestur
+
+ISNIC leitar aðeins eftir léni, ekki kennitölu, svo lénið er ágiskað út frá
+skráðu nafni fyrirtækisins og síðan **staðfest**. Sé skráður eigandi lénsins
+ekki sama fyrirtæki er færslunni hent. `osp.is` gæti verið í eigu einhvers sem
+tengist Hárgreiðslustofunni Ösp ekki neitt, og það er einmitt tilvikið sem
+staðfestingin er til að stöðva.
+
+Í mesta lagi þrjú lén eru reynd í hverri uppflettingu. Þetta er þægindi við
+skráningu eins viðskiptavinar, ekki leit í gegnum skrána.
+
 ## Vefsíðugerð
 
 Þegar uppsetningarhjálpin klárast eru smíðaðar **þrjár fullbúnar vefsíður** úr

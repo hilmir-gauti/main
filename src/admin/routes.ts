@@ -43,7 +43,8 @@ import {
 import { listServices, listStaff, updateService } from '../domain/catalog.ts';
 import { flowForIndustry, flowSummary } from '../domain/intake/flows.ts';
 import { bookingAnswerSummary } from '../domain/intake/service.ts';
-import { INDUSTRIES, industryPreset } from '../domain/industries.ts';
+import { INDUSTRIES, industryLabel, industryPreset } from '../domain/industries.ts';
+import { lookupCompanyProfile } from '../domain/lookup.ts';
 import {
   activateTenant,
   listTasks,
@@ -72,7 +73,7 @@ import { createPairingInvite, listDevices, pendingInvite } from '../integrations
 import { listNotifications } from '../integrations/push/expo.ts';
 import { webhookUrls } from '../integrations/twilio.ts';
 import { csrfProtect, loadSession, requireOperator } from '../http/middleware.ts';
-import { htmlResponse, redirect, serializeCookie, withCookie } from '../http/response.ts';
+import { htmlResponse, json, redirect, serializeCookie, withCookie } from '../http/response.ts';
 import { Router } from '../http/router.ts';
 import type { RequestContext } from '../http/context.ts';
 import { chosenVariant, generateVariants, latestBuild, listVariants, publishVariant } from '../website/generator.ts';
@@ -343,6 +344,15 @@ export function adminRouter(): Router {
         breadcrumb: [{ label: 'Viðskiptavinir', href: '/vidskiptavinir' }, { label: 'Nýr' }] },
       wizardForm(ctx, {}, {}),
     )), guard);
+
+  /**
+   * Company lookup for the wizard. Returns JSON rather than re-rendering, so
+   * whatever the operator has already typed is never thrown away by a reload.
+   */
+  router.post('/vidskiptavinir/uppfletting', async (ctx) => {
+    const outcome = await lookupCompanyProfile(ctx.form().kennitala ?? '', { industryLabel });
+    return json(outcome);
+  }, guardWrite);
 
   router.post('/vidskiptavinir/nyr', (ctx) => {
     const form = ctx.form();
@@ -1596,7 +1606,17 @@ function wizardForm(ctx: RequestContext, values: Record<string, string>, errors:
             <p class="help">Ræður þjónustulista, opnunartíma, spurningaflæði og útlitstillögum.</p>
           </div>
 
-          ${field('kennitala', 'Kennitala', { placeholder: '000000-0000' })}
+          <div class="field">
+            <label for="kennitala">Kennitala</label>
+            <div class="lookup-row">
+              <input id="kennitala" name="kennitala" type="text" placeholder="000000-0000"
+                     value="${values.kennitala ?? ''}" autocomplete="off">
+              <button class="btn btn-ghost" type="button" id="uppfletting">Sækja upplýsingar</button>
+            </div>
+            <p class="help">Sækir nafn, heimilisfang og fag úr fyrirtækjaskrá, og lén, síma og netfang úr lénaskrá.</p>
+            ${errors.kennitala ? html`<p class="error-text">${errors.kennitala}</p>` : ''}
+            <div id="uppfletting-svar" hidden></div>
+          </div>
           ${field('netfang', 'Netfang', { type: 'email' })}
           ${field('simi', 'Símanúmer', { placeholder: '555 1234' })}
           ${field('len', 'Lén', { placeholder: 'stofan.is', help: 'Ef lénið er ekki til ennþá má sleppa því.' })}
@@ -1700,6 +1720,122 @@ function wizardForm(ctx: RequestContext, values: Record<string, string>, errors:
 
         select.addEventListener('change', apply);
         apply();
+
+        // --- Company lookup by kennitala ---------------------------------
+        var SOURCE_LABEL = {
+          fyrirtaekjaskra: 'fyrirtækjaskrá',
+          isnic: 'lénaskrá',
+          gervigreind: 'gervigreind'
+        };
+
+        var fagTouched = false;
+        select.addEventListener('change', function () { fagTouched = true; });
+
+        var button = document.getElementById('uppfletting');
+        var panel = document.getElementById('uppfletting-svar');
+        var ktInput = document.getElementById('kennitala');
+
+        function note(kind, text) {
+          panel.hidden = false;
+          panel.className = 'lookup-note lookup-' + kind;
+          panel.textContent = text;
+        }
+
+        // A filled field is marked with where the value came from, so an
+        // AI-written description is never mistaken for a registry fact.
+        function markSource(name, source) {
+          var input = form.elements[name];
+          if (!input) return;
+          var wrapper = input.closest('.field');
+          if (!wrapper) return;
+
+          var existing = wrapper.querySelector('.source-tag');
+          if (existing) existing.remove();
+
+          var tag = document.createElement('span');
+          tag.className = 'source-tag source-' + source;
+          tag.textContent = SOURCE_LABEL[source] || source;
+          var label = wrapper.querySelector('label');
+          if (label) label.appendChild(tag);
+        }
+
+        async function lookup() {
+          var kennitala = ktInput.value.trim();
+          if (!kennitala) { note('bad', 'Sláðu inn kennitölu fyrst.'); return; }
+
+          button.disabled = true;
+          var original = button.textContent;
+          button.textContent = 'Leita…';
+          note('info', 'Fletti upp í fyrirtækjaskrá og lénaskrá…');
+
+          try {
+            var body = new URLSearchParams();
+            body.set('kennitala', kennitala);
+            body.set('_csrf', form.elements._csrf.value);
+
+            var response = await fetch('/vidskiptavinir/uppfletting', {
+              method: 'POST',
+              headers: { 'content-type': 'application/x-www-form-urlencoded' },
+              body: body.toString()
+            });
+            var result = await response.json();
+
+            if (!result.found) { note('bad', result.message); return; }
+
+            var filled = [];
+            Object.keys(result.profile.fields).forEach(function (name) {
+              var entry = result.profile.fields[name];
+              var input = form.elements[name];
+              if (!input) return;
+
+              // Never overwrite something already typed — the operator may
+              // know better than the register does. A <select> always reports
+              // a value (its first option), so "untouched" has to be tracked
+              // rather than inferred from emptiness.
+              var untouched = input.tagName === 'SELECT' ? !fagTouched : input.value.trim() === '';
+              if (!untouched) return;
+
+              input.value = entry.value;
+              markSource(name, entry.source);
+              filled.push(name);
+              if (name === 'fag') apply();
+            });
+
+            var lines = [];
+            lines.push(filled.length + ' reitir fylltir út.');
+            if (result.profile.legalForm) lines.push('Rekstrarform: ' + result.profile.legalForm);
+            if (result.profile.isat) lines.push('ÍSAT: ' + result.profile.isat);
+            if (result.profile.vskNumber) lines.push('VSK-númer: ' + result.profile.vskNumber);
+            result.profile.notes.forEach(function (entry) { lines.push('• ' + entry); });
+
+            note(filled.length > 0 ? 'ok' : 'info', lines.join('\\n'));
+          } catch (error) {
+            note('bad', 'Uppfletting mistókst: ' + error);
+          } finally {
+            button.disabled = false;
+            button.textContent = original;
+          }
+        }
+
+        button.addEventListener('click', lookup);
+        ktInput.addEventListener('keydown', function (event) {
+          if (event.key === 'Enter') { event.preventDefault(); lookup(); }
+        });
       })();
-    </script>`;
+    </script>
+
+    <style>
+      .lookup-row{display:flex;gap:.5rem;align-items:stretch}
+      .lookup-row input{flex:1}
+      .lookup-note{margin-top:.6rem;padding:.7rem .85rem;border-radius:var(--r);font-size:.87rem;
+        white-space:pre-line;line-height:1.5;border:1px solid transparent}
+      .lookup-ok{background:var(--ok-soft);color:var(--ok);border-color:color-mix(in srgb,var(--ok) 25%,transparent)}
+      .lookup-info{background:var(--brand-soft);color:var(--brand);border-color:color-mix(in srgb,var(--brand) 25%,transparent)}
+      .lookup-bad{background:var(--bad-soft);color:var(--bad);border-color:color-mix(in srgb,var(--bad) 25%,transparent)}
+      .source-tag{margin-left:.45rem;padding:.1rem .42rem;border-radius:999px;font-size:.68rem;
+        font-weight:700;letter-spacing:.03em;text-transform:uppercase;vertical-align:middle}
+      .source-fyrirtaekjaskra{background:var(--ok-soft);color:var(--ok)}
+      .source-isnic{background:var(--brand-soft);color:var(--brand)}
+      .source-gervigreind{background:var(--warn-soft);color:var(--warn)}
+    </style>`;
 }
