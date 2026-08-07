@@ -84,29 +84,74 @@ class SmtpConnection {
     return this.socket;
   }
 
+  /** Last reply received, kept so failures can quote the server verbatim. */
+  lastReply = '';
+
+  /**
+   * Reads until a terminal reply line arrives.
+   *
+   * Written with explicit listeners rather than `Promise.race` over `once()`:
+   * the losing branches of a race leave their listeners attached, which leaks
+   * one per command and eventually trips Node's max-listeners warning on a
+   * long SMTP conversation.
+   */
   async readReply(): Promise<SmtpReply> {
-    const deadline = Date.now() + this.timeoutMs;
-
-    for (;;) {
-      const complete = this.tryParse();
-      if (complete) return complete;
-
-      if (Date.now() > deadline) {
-        throw new IntegrationError('smtp', `Tímamörk við lestur svars (${this.timeoutMs}ms)`);
-      }
-
-      const [chunk] = (await Promise.race([
-        once(this.socket, 'data'),
-        once(this.socket, 'timeout').then(() => {
-          throw new IntegrationError('smtp', 'Tenging féll á tíma.');
-        }),
-        once(this.socket, 'close').then(() => {
-          throw new IntegrationError('smtp', 'Tengingu lokað af þjóni.');
-        }),
-      ])) as [string];
-
-      this.buffer += chunk;
+    const buffered = this.tryParse();
+    if (buffered) {
+      this.lastReply = buffered.lines.join(' | ');
+      return buffered;
     }
+
+    return new Promise<SmtpReply>((resolve, reject) => {
+      const socket = this.socket;
+
+      const cleanup = () => {
+        socket.off('data', onData);
+        socket.off('error', onError);
+        socket.off('close', onClose);
+        socket.off('timeout', onTimeout);
+        clearTimeout(timer);
+      };
+
+      const onData = (chunk: string) => {
+        this.buffer += chunk;
+        const reply = this.tryParse();
+        if (reply) {
+          cleanup();
+          this.lastReply = reply.lines.join(' | ');
+          resolve(reply);
+        }
+      };
+
+      const onError = (error: Error) => {
+        cleanup();
+        reject(new IntegrationError('smtp', `Tenging rofnaði: ${error.message}`, { cause: error }));
+      };
+
+      const onClose = () => {
+        cleanup();
+        reject(
+          new IntegrationError(
+            'smtp',
+            this.lastReply
+              ? `Þjónninn lokaði tengingunni. Síðasta svar: ${this.lastReply}`
+              : 'Þjónninn lokaði tengingunni áður en hann svaraði.',
+          ),
+        );
+      };
+
+      const onTimeout = () => {
+        cleanup();
+        reject(new IntegrationError('smtp', `Þjónninn svaraði ekki innan ${this.timeoutMs}ms.`));
+      };
+
+      const timer = setTimeout(onTimeout, this.timeoutMs);
+
+      socket.on('data', onData);
+      socket.once('error', onError);
+      socket.once('close', onClose);
+      socket.once('timeout', onTimeout);
+    });
   }
 
   /** Returns a reply once a terminal line ("250 text") has arrived. */
@@ -147,7 +192,9 @@ class SmtpConnection {
 
 function expect(reply: SmtpReply, expected: number[], step: string): void {
   if (!expected.includes(reply.code)) {
-    throw new IntegrationError('smtp', `${step} mistókst: ${reply.code} ${reply.lines.join(' | ')}`);
+    // The server's own text is the most useful thing we can surface — it is
+    // what the provider's documentation and support will refer to.
+    throw new IntegrationError('smtp', `${step} mistókst: ${reply.code} ${reply.lines.join(' ').trim()}`);
   }
 }
 

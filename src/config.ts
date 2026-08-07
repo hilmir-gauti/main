@@ -36,6 +36,47 @@ function envBool(key: string, fallback: boolean): boolean {
 const nodeEnv = (env('NODE_ENV', 'development') as NodeEnv) || 'development';
 const dataDir = resolve(env('DATA_DIR', './data'));
 
+/**
+ * Integration credentials entered in the control panel.
+ *
+ * The packaged desktop build has no `.env` and no shell, so credentials are
+ * stored (encrypted) in the database and pushed in here once it opens. They
+ * take precedence over environment variables: someone who typed a value into
+ * the UI expects that value to win over whatever the machine was started with.
+ *
+ * Kept as a plain mutable object rather than importing the settings module,
+ * because `core/db.ts` imports this file — the dependency has to point one way.
+ */
+let overrides: Record<string, string> = {};
+
+export function setConfigOverrides(next: Record<string, string>): void {
+  overrides = { ...next };
+}
+
+export function configOverrides(): Record<string, string> {
+  return { ...overrides };
+}
+
+/** Override first, then environment, then the default. */
+function setting(key: string, fallback = ''): string {
+  const override = overrides[key];
+  if (override !== undefined && override !== '') return override;
+  return env(key, fallback);
+}
+
+function settingInt(key: string, fallback: number): number {
+  const raw = setting(key);
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function settingBool(key: string, fallback: boolean): boolean {
+  const raw = setting(key).toLowerCase();
+  if (raw === '') return fallback;
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'já';
+}
+
 export const config = {
   env: nodeEnv,
   isProduction: nodeEnv === 'production',
@@ -74,54 +115,115 @@ export const config = {
   },
 
   google: {
-    clientId: env('GOOGLE_CLIENT_ID'),
-    clientSecret: env('GOOGLE_CLIENT_SECRET'),
+    get clientId(): string {
+      return setting('GOOGLE_CLIENT_ID');
+    },
+    get clientSecret(): string {
+      return setting('GOOGLE_CLIENT_SECRET');
+    },
     /** Must match the redirect URI registered in Google Cloud Console. */
-    redirectUri: env('GOOGLE_REDIRECT_URI', `${env('BASE_URL', 'http://localhost:8080').replace(/\/+$/, '')}/oauth/google/callback`),
+    get redirectUri(): string {
+      return setting('GOOGLE_REDIRECT_URI', `${config.baseUrl}/oauth/google/callback`);
+    },
     get enabled(): boolean {
       return Boolean(config.google.clientId && config.google.clientSecret);
     },
   },
 
   smtp: {
-    host: env('SMTP_HOST'),
-    port: envInt('SMTP_PORT', 587),
-    user: env('SMTP_USER'),
-    password: env('SMTP_PASSWORD'),
+    get host(): string {
+      return setting('SMTP_HOST');
+    },
+    get port(): number {
+      return settingInt('SMTP_PORT', 587);
+    },
+    get user(): string {
+      return setting('SMTP_USER');
+    },
+    get password(): string {
+      return setting('SMTP_PASSWORD');
+    },
     /** true = implicit TLS (port 465), false = STARTTLS upgrade (port 587). */
-    implicitTls: envBool('SMTP_IMPLICIT_TLS', envInt('SMTP_PORT', 587) === 465),
-    fromName: env('SMTP_FROM_NAME', 'Rafræn Þjónusta'),
-    fromEmail: env('SMTP_FROM_EMAIL', env('SMTP_USER')),
+    get implicitTls(): boolean {
+      return settingBool('SMTP_IMPLICIT_TLS', config.smtp.port === 465);
+    },
+    get fromName(): string {
+      return setting('SMTP_FROM_NAME', 'Rafræn Þjónusta');
+    },
+    get fromEmail(): string {
+      return setting('SMTP_FROM_EMAIL', config.smtp.user);
+    },
     get enabled(): boolean {
       return Boolean(config.smtp.host && config.smtp.fromEmail);
     },
   },
 
   twilio: {
-    accountSid: env('TWILIO_ACCOUNT_SID'),
-    authToken: env('TWILIO_AUTH_TOKEN'),
+    get accountSid(): string {
+      return setting('TWILIO_ACCOUNT_SID');
+    },
+    get authToken(): string {
+      return setting('TWILIO_AUTH_TOKEN');
+    },
     /** Number that answers calls, in E.164 (e.g. +3545550100). */
-    phoneNumber: env('TWILIO_PHONE_NUMBER'),
+    get phoneNumber(): string {
+      return setting('TWILIO_PHONE_NUMBER');
+    },
     /** Verify inbound webhook signatures. Disable only for local testing. */
-    validateSignature: envBool('TWILIO_VALIDATE_SIGNATURE', true),
+    get validateSignature(): boolean {
+      return settingBool('TWILIO_VALIDATE_SIGNATURE', true);
+    },
     get enabled(): boolean {
       return Boolean(config.twilio.accountSid && config.twilio.authToken);
     },
   },
 
+  vercel: {
+    /** Personal or team token from vercel.com/account/tokens. */
+    get token(): string {
+      return setting('VERCEL_TOKEN');
+    },
+    /** Only needed when the projects belong to a team rather than a personal account. */
+    get teamId(): string {
+      return setting('VERCEL_TEAM_ID');
+    },
+    /**
+     * Prefix for the generated project names, so a Vercel account shared with
+     * other work stays legible: `rth-harstofan-osp` rather than `harstofan-osp`.
+     */
+    get projectPrefix(): string {
+      return setting('VERCEL_PROJECT_PREFIX', 'rth');
+    },
+    get enabled(): boolean {
+      return Boolean(config.vercel.token);
+    },
+  },
+
   push: {
     /** Expo push endpoint — works for both iOS and Android from one token. */
-    expoEndpoint: env('EXPO_PUSH_ENDPOINT', 'https://exp.host/--/api/v2/push/send'),
+    get expoEndpoint(): string {
+      return setting('EXPO_PUSH_ENDPOINT', 'https://exp.host/--/api/v2/push/send');
+    },
     /** Optional; required only if the Expo project enforces push security. */
-    expoAccessToken: env('EXPO_ACCESS_TOKEN'),
-    enabled: envBool('PUSH_ENABLED', true),
+    get expoAccessToken(): string {
+      return setting('EXPO_ACCESS_TOKEN');
+    },
+    get enabled(): boolean {
+      return settingBool('PUSH_ENABLED', true);
+    },
   },
 
   ai: {
     /** Powers the phone receptionist's speech understanding and website copy. */
-    apiKey: env('ANTHROPIC_API_KEY'),
-    baseUrl: env('ANTHROPIC_BASE_URL', 'https://api.anthropic.com'),
-    model: env('AI_MODEL', 'claude-sonnet-5'),
+    get apiKey(): string {
+      return setting('ANTHROPIC_API_KEY');
+    },
+    get baseUrl(): string {
+      return setting('ANTHROPIC_BASE_URL', 'https://api.anthropic.com');
+    },
+    get model(): string {
+      return setting('AI_MODEL', 'claude-sonnet-5');
+    },
     get enabled(): boolean {
       return Boolean(config.ai.apiKey);
     },
@@ -147,6 +249,21 @@ export type Config = typeof config;
  * Fails fast on configuration that is unsafe in production. Development keeps
  * working with generated stand-ins so `npm start` never blocks on setup.
  */
+/**
+ * Whether a value looks like a shell command the shell never ran.
+ *
+ * `fly secrets set APP_SECRET="$(openssl rand -hex 32)"` is correct in bash and
+ * silently wrong in CMD and PowerShell, which pass the text through verbatim.
+ * Nothing downstream notices — the value is simply a short, fixed string — so
+ * the check happens here, where the length is already being questioned.
+ *
+ * Random secrets are hex or base64 and carry none of this punctuation, so the
+ * test cannot fire on a real value.
+ */
+export function looksUnexpanded(value: string): boolean {
+  return /^[$%`]|\$\(|\$\{|%[A-Za-z_]+%/.test(value);
+}
+
 export function validateConfig(): string[] {
   const problems: string[] = [];
 
@@ -155,10 +272,26 @@ export function validateConfig(): string[] {
       problems.push('APP_SECRET vantar — settu langan tilviljanakenndan streng (openssl rand -hex 32).');
     }
   } else if (config.appSecret.length < 32 && config.isProduction) {
-    problems.push('APP_SECRET er of stutt — notaðu að minnsta kosti 32 stafi.');
+    // The length is safe to log and is the whole diagnosis: a value that is
+    // present but short almost always means the shell did not expand what was
+    // typed, which is silent everywhere except here.
+    problems.push(
+      `APP_SECRET er of stutt (${config.appSecret.length} stafir) — notaðu að minnsta kosti 32.`,
+    );
+
+    if (looksUnexpanded(config.appSecret)) {
+      problems.push(
+        'APP_SECRET lítur út eins og óútvíkkuð skipun úr skel. `$(...)` virkar í bash en ekki í ' +
+        'Windows-skel — búðu til gildið fyrst og límdu það svo inn: ' +
+        'node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"',
+      );
+    }
   }
 
-  if (config.isProduction && !config.baseUrl.startsWith('https://')) {
+  // Loopback is exempt: the packaged desktop build serves the console to the
+  // machine it runs on, where plain HTTP never crosses a network boundary and
+  // browsers reject Secure cookies anyway.
+  if (config.isProduction && !config.baseUrl.startsWith('https://') && !isLoopback(config.baseUrl)) {
     problems.push('BASE_URL verður að nota https:// í rekstri (session-kökur eru merktar Secure).');
   }
 
@@ -177,6 +310,25 @@ export function validateConfig(): string[] {
   }
 
   return problems;
+}
+
+/** True when a URL points at this machine, e.g. the desktop build. */
+export function isLoopback(url: string): boolean {
+  try {
+    const host = new URL(url).hostname;
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether session cookies should carry the `Secure` flag. Setting it on a
+ * plain-HTTP loopback origin makes the browser drop the cookie entirely, which
+ * would silently break login in the desktop build.
+ */
+export function useSecureCookies(): boolean {
+  return config.baseUrl.startsWith('https://');
 }
 
 /** Human-readable integration status, shown on the admin dashboard. */
@@ -199,6 +351,14 @@ export function integrationStatus(): Array<{ key: string; label: string; ready: 
       label: 'Símsvörun (Twilio)',
       ready: config.twilio.enabled,
       hint: config.twilio.enabled ? `Númer ${config.twilio.phoneNumber || 'óstillt'}` : 'Vantar TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN',
+    },
+    {
+      key: 'vercel',
+      label: 'Vefhýsing (Vercel)',
+      ready: config.vercel.enabled,
+      hint: config.vercel.enabled
+        ? 'Vefsíður fara í loftið á Vercel'
+        : 'Vantar VERCEL_TOKEN — vefsíður eru smíðaðar en hýstar hér heima',
     },
     {
       key: 'push',

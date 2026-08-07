@@ -1,0 +1,58 @@
+# Fly.io configuration for the Rafræn Þjónusta control plane.
+#
+#   fly launch --no-deploy --copy-config
+#   fly volumes create rafraen_gogn --size 3 --region lhr
+#   fly deploy
+#
+# APP_SECRET er sett á milli, í tveimur skrefum — `$(...)` er bash og víkkast
+# ekki út í Windows-skel, sem sendir þá skipunina áfram sem texta:
+#
+#   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+#   fly secrets set APP_SECRET=<gildið>
+#
+# London is the closest region to Iceland with a full Fly presence (~20 ms);
+# Stockholm ("arn") is the alternative if you prefer to stay inside the EEA
+# for data-residency reasons.
+
+app = "rafraen-thjonusta"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "8080"
+  DATA_DIR = "/data"
+  # Set this to the real hostname before the first deploy: OAuth callbacks,
+  # Twilio webhooks and generated booking links are all built from it, and
+  # config validation rejects a non-https value in production.
+  BASE_URL = "https://rafraen-thjonusta.fly.dev"
+
+# The database is a SQLite file here, so it must survive restarts.
+[[mounts]]
+  source = "rafraen_gogn"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+
+  # Both of these matter more than they look. The background worker sends
+  # reminders and syncs calendars on an in-process timer, so a machine that
+  # sleeps between requests stops doing its job; and SQLite tolerates exactly
+  # one writer, so this app must never scale past a single machine.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "15s"
+    interval = "30s"
+    method = "GET"
+    path = "/heilsa"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

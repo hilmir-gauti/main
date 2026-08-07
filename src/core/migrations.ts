@@ -447,7 +447,16 @@ CREATE TABLE website_variant (
 CREATE UNIQUE INDEX idx_website_variant_key ON website_variant(tenant_id, variant);
 `;
 
+// Where a build ended up once it left this machine. Empty for a site that is
+// only served locally, which stays a supported way to run.
+const externalHosting = `
+ALTER TABLE website_build ADD COLUMN deploy_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE website_build ADD COLUMN deploy_state TEXT NOT NULL DEFAULT '';
+ALTER TABLE website_build ADD COLUMN deployed_at INTEGER;
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'upphafsskema', sql: initialSchema },
   { version: 2, name: 'innskraningarspurningar_og_vefutgafur', sql: intakeAnswers },
+  { version: 3, name: 'ytri_vefhysing', sql: externalHosting },
 ];

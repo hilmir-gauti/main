@@ -180,7 +180,10 @@ export async function sendMail(input: SendMailInput): Promise<SendMailResult> {
     logger.info('Tölvupóstur sendur', { to: recipient.email, subject: input.subject, template: input.template });
     return { id: messageId, status: 'sent' };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    // Never let an empty message through: the console shows this text, and a
+    // blank failure reason is the one thing an operator cannot act on.
+    const raw = error instanceof Error ? error.message : String(error);
+    const message = raw.trim() || `Tengingin við ${smtp.host}:${smtp.port} slitnaði án skýringar.`;
     run("UPDATE message_log SET status = 'villa', error = ? WHERE id = ?", message.slice(0, 500), messageId);
     logger.error('Sending tölvupósts mistókst', { to: recipient.email, error: message });
     return { id: messageId, status: 'villa', error: message };

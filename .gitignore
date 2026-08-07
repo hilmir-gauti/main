@@ -10,3 +10,5 @@ data/
 *.log
 mobile/node_modules/
 mobile/.expo/
+dist-exe/
+.node-cache/

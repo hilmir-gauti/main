@@ -14,10 +14,15 @@
     "test": "node --experimental-sqlite --experimental-strip-types --test tests/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "seed": "node --experimental-sqlite --experimental-strip-types src/scripts/seed.ts",
-    "setup": "node --experimental-sqlite --experimental-strip-types src/scripts/setup.ts"
+    "setup": "node --experimental-sqlite --experimental-strip-types src/scripts/setup.ts",
+    "exe": "node build/make-exe.mjs --target win",
+    "exe:all": "node build/make-exe.mjs --target all",
+    "desktop": "node --experimental-sqlite --experimental-strip-types src/desktop/main.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "esbuild": "^0.28.1",
+    "postject": "^1.0.0-alpha.6",
     "typescript": "^5.7.0"
   }
 }

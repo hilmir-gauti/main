@@ -16,6 +16,7 @@ handvirkt (DNS-færslur, Twilio-slóðir, Google-tenging).
 ## Innihald
 
 - [Byrjað](#byrjað)
+- [Keyrsluskrá (.exe)](#sem-forrit-exe)
 - [Hvað kerfið gerir](#hvað-kerfið-gerir)
 - [Spurningaflæði eftir fagi](#spurningaflæði-eftir-fagi)
 - [Vefsíðugerð](#vefsíðugerð)
@@ -29,10 +30,73 @@ handvirkt (DNS-færslur, Twilio-slóðir, Google-tenging).
 
 ## Byrjað
 
+### Sem forrit (.exe)
+
+Sæktu `RafraenThjonusta.exe` og tvísmelltu á hana. Forritið ræsir sig, opnar
+vafrann og býður þér að stofna aðganginn þinn — engin uppsetning, enginn
+gagnagrunnur að setja upp, engin skipanalína.
+
+Til að smíða keyrsluskrána sjálf/ur:
+
+```bash
+npm install          # nauðsynlegt — smíðaverkfærin eru devDependencies
+npm run exe          # Windows .exe í dist-exe/
+npm run exe:all      # Windows, macOS og Linux
+```
+
+`npm install` verður að keyra fyrst, og aftur eftir hvert `git pull` sem bætir
+við verkfærum. Sleppirðu því segir smíðin þér það beint.
+
+Skriptið sækir Node-keyrsluumhverfi sem passar við þína Node-útgáfu (blobið og
+keyrsluumhverfið verða að vera sama útgáfa). Keyrirðu Node-útgáfu sem er ekki
+gefin út á nodejs.org — t.d. næturútgáfu — veldu aðra:
+
+```bash
+set RTH_NODE_VERSION=v22.14.0 && npm run exe     # Windows
+RTH_NODE_VERSION=v22.14.0 npm run exe            # macOS/Linux
+```
+
+Gögnin þín eru geymd hjá þér:
+
+| Kerfi | Staðsetning |
+| --- | --- |
+| Windows | `%APPDATA%\RafraenThjonusta` |
+| macOS | `~/Library/Application Support/RafraenThjonusta` |
+| Linux | `~/.local/share/rafraen-thjonusta` |
+
+Þar er gagnagrunnurinn (`rafraen.sqlite`), myndaðar vefsíður og
+stillingaskráin. **Taktu afrit af þessari möppu reglulega** — hún er allt
+kerfið.
+
+Keyrsluskráin er um 84 MB því hún inniheldur Node-keyrsluumhverfið sjálft.
+Ekkert þarf að setja upp á vélinni.
+
+> **Windows SmartScreen** — skráin er ekki undirrituð með kóðaskírteini, svo
+> Windows sýnir viðvörun í fyrsta skipti. Veldu „More info“ og svo
+> „Run anyway“. Til að losna við það þarf Authenticode-skírteini.
+
+### Að uppfæra
+
+Keyrsluskráin er frosin afrit af kóðanum — hún uppfærist ekki sjálf.
+
+```bash
+git pull
+npm install
+npm run exe
+```
+
+Keyrðu svo **nýju** skrána úr `dist-exe/`. Hafirðu afritað þá gömlu eitthvert
+annað þarf að skipta henni út þar líka.
+
+Til að sjá hvaða útgáfu þú ert að keyra: **Stillingar → Kerfið** sýnir
+smíðatíma og commit, og sama kemur fram í svarta glugganum við ræsingu.
+
+### Sem þjónn (fyrir hýsingu)
+
 Krafa: **Node.js 22.5 eða nýrra** (kerfið notar innbyggða SQLite-einingu Node).
 
 ```bash
-npm install                 # aðeins TypeScript — engar keyrsluháðar einingar
+npm install                 # aðeins þýðingartól — engar keyrsluháðar einingar
 cp .env.example .env        # fylltu út það sem þú átt; restin fer í þurrkeyrslu
 npm run setup               # stofnar stjórnandaaðganginn þinn
 npm run seed                # valfrjálst: þrír sýniviðskiptavinir með bókunum
@@ -40,6 +104,66 @@ npm run dev                 # ræsir á http://localhost:8080
 ```
 
 Opnaðu **http://localhost:8080/stjornbord**.
+
+### Í hýsingu allan sólarhringinn
+
+`.exe`-skráin keyrir aðeins meðan tölvan þín er í gangi. Eigi símsvarinn að
+svara og áminningar að fara út á nóttunni þarf kerfið að vera á netþjóni.
+
+Í boði eru `Dockerfile` og `fly.toml` fyrir [Fly.io](https://fly.io):
+
+```bash
+fly launch --no-deploy --copy-config
+fly volumes create rafraen_gogn --size 3 --region lhr
+fly deploy
+```
+
+`APP_SECRET` þarf að setja á milli. Búðu gildið til í tveimur skrefum frekar en
+einu — `$(...)` er bash-skipun sem Windows-skel víkkar ekki út, heldur sendir
+áfram sem texta, og þá stöðvast ræsingin á of stuttu leyndarmáli:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+fly secrets set APP_SECRET=<límdu gildið hér>
+```
+
+Þetta virkar eins í CMD, PowerShell og bash. Leyndarmálið afkóðar geymd
+aðgangsorð og OAuth-teikn, svo geymdu það — breytist það verða þau ólæsileg.
+
+Breyttu `BASE_URL` í `fly.toml` í raunverulega slóðina áður en þú keyrir
+`fly deploy` — Google-innskráning, Twilio-vefkrókar og bókunartenglar eru allir
+smíðaðir út frá henni, og kerfið neitar að ræsa á `http://` í rekstri.
+
+Opnaðu svo `https://<lén>/uppsetning` til að stofna stjórnandaaðganginn — það
+er sama fyrsta-skiptis-ferli og í `.exe`-skránni, svo enginn skjár í skel þarf.
+
+Tvennt í `fly.toml` má ekki hreyfa við: `auto_stop_machines = false`, því
+bakgrunnsverkið sem sendir áminningar er tímamælir inni í ferlinu og hættir að
+vinna sofni vélin; og **aðeins ein vél** (`fly scale count 1`), því
+gagnagrunnurinn er SQLite-skrá sem þolir einn skrifara.
+
+Sama mynd keyrir á Railway, Render eða hvaða VPS sem er — það eina sem skiptir
+máli er varanlegur diskur á `/data` og eitt ferli.
+
+> **Vercel gengur ekki fyrir stjórnborðið.** Skráakerfið þar er skrifvarið og
+> ferli lifa ekki milli beiðna, en gagnagrunnurinn er skrá á diski og
+> bakgrunnsverkið er tímamælir. Vefsíður viðskiptavina eiga hins vegar vel
+> heima þar — sjá næsta kafla.
+
+### Vefsíður viðskiptavina á Vercel
+
+Mynduð vefsíða er ein sjálfstæð HTML-skrá án byggingarþreps, sem er nákvæmlega
+það sem hraðnet á að hýsa. Settu `VERCEL_TOKEN` inn undir **Tengingar**, opnaðu
+svo viðskiptavin → **Vefsíða** → **Setja í loftið á Vercel**.
+
+Hver viðskiptavinur fær sitt eigið Vercel-verkefni (`rth-<slug>`). Sé lén skráð
+á viðskiptavininn tengist það sjálfkrafa, og þær DNS-færslur sem eftir standa
+birtast í skilaboðunum.
+
+Bókunarviðmótið á síðunni kallar áfram á þetta stjórnborð, sem sendir þegar
+`Access-Control-Allow-Origin` á opinbera bókunar-API-inu — það þarf því ekkert
+að stilla til viðbótar. Vefsíðan er áfram aðgengileg héðan á `/v/<slug>` hvort
+sem er, svo ytri hýsing er viðbót en aldrei forsenda.
 
 ### Þurrkeyrsla
 
@@ -145,7 +269,90 @@ stöðvast aldrei vegna þess að gervigreind sé ekki tiltæk.
 
 ---
 
+## Uppfletting eftir kennitölu
+
+Í töfrasprotanum slærðu inn kennitölu fyrirtækisins og ýtir á **Sækja
+upplýsingar**. Reitirnir fyllast sjálfkrafa og hver þeirra er merktur þeim sem
+gaf gildið.
+
+| Uppruni | Reitir |
+|---|---|
+| **Fyrirtækjaskrá** (Skatturinn) | Nafn, heimilisfang, póstnúmer, fag (úr ÍSAT-flokkun). Auk þess rekstrarform, ÍSAT-númer og VSK-númer til staðfestingar |
+| **Lénaskrá** (ISNIC) | Lén, símanúmer, netfang |
+| **Gervigreind** | Lýsing á fyrirtækinu, samin úr staðreyndunum að ofan |
+
+Reitur sem þú hefur þegar fyllt út er aldrei yfirskrifaður.
+
+### Gervigreind flettir ekki upp
+
+Þetta er ástæðan fyrir uppruna-merkingunum. Spyrjirðu mállíkan „hvaða fyrirtæki
+er með kennitölu 5501234567“ þá svarar það — með trúverðugu nafni, trúverðugu
+símanúmeri og trúverðugu netfangi. Ekkert af því er flett upp; það er allt
+samið. Skáldað símanúmer sem endar á vefsíðu viðskiptavinar er símanúmer
+einhvers annars.
+
+Þess vegna er röðin: skrár fyrst, líkan á eftir, og aðeins í þann eina reit sem
+er raunverulegt ritverkefni. Finnist reitur hvergi stendur hann tómur og
+ástæðan er sögð berum orðum — hann er aldrei fylltur með ágiskun.
+
+### Eigandi léns er staðfestur
+
+ISNIC leitar aðeins eftir léni, ekki kennitölu, svo lénið er ágiskað út frá
+skráðu nafni fyrirtækisins og síðan **staðfest**. Sé skráður eigandi lénsins
+ekki sama fyrirtæki er færslunni hent. `osp.is` gæti verið í eigu einhvers sem
+tengist Hárgreiðslustofunni Ösp ekki neitt, og það er einmitt tilvikið sem
+staðfestingin er til að stöðva.
+
+Í mesta lagi þrjú lén eru reynd í hverri uppflettingu. Þetta er þægindi við
+skráningu eins viðskiptavinar, ekki leit í gegnum skrána.
+
 ## Vefsíðugerð
+
+Hver vefsíða er **ein sjálfstæð HTML-skrá** — engin utanaðkomandi leturgerð,
+ekkert hreyfimyndasafn, engin ytri skrá. Það er forsenda þess að hægt sé að
+birta hana á hraðneti og að hún opnist hratt á síma yfir 4G.
+
+Innan þeirra marka er þetta í síðunum:
+
+- **Fljótandi haus** sem þéttist og fær móðugler þegar skrunað er.
+- **Hreyfður bakgrunnur í hetjunni** og fagbundið mynstur — flæðandi þræðir
+  fyrir stofur, hringir fyrir verkstæði, hornréttar lagnir fyrir iðnaðarmenn,
+  púlslína fyrir heilsu.
+- **Efni birtist við skrun**, með stigvaxandi töf innan hvers kafla.
+- **Fastur bókunarborði** neðst á símum þegar hetjan er skrunuð úr sýn.
+- **Algengar spurningar** svaraðar úr raunverulegum stillingum viðskiptavinarins
+  — afbókunarfrestur og lágmarksfyrirvari eru tölurnar sem bókanavélin fylgir.
+
+### Hreyfingar má slökkva á
+
+Allar hreyfingar eru inni í `prefers-reduced-motion: no-preference`. Sá sem
+hefur beðið stýrikerfið um minni hreyfingu fær kyrra síðu — ekki skerta.
+
+Opinberanir eru sömuleiðis valkvæðar: klasinn sem felur efnið er settur á
+síðuna af skriftunni sjálfri. Keyri hún ekki — lokað á skriftur, gamall vafri —
+er ekkert falið og síðan er einfaldlega kyrr.
+
+### Enginn litavalsreitur
+
+Það var röng spurning. Þú ert að skrá fyrirtæki einhvers annars, veist sjaldnast
+lit þess, og niðurstaðan var að flestar síður komu út í sjálfgefna bláa litnum.
+
+Liturinn kemur núna úr tvennu, í þessari röð: **núverandi vefsíðu fyrirtækisins**
+ef hún er til, og annars **faginu** — naglastofa og pípari opna ekki í sama tón.
+
+### Sækja af núverandi vefsíðu
+
+Sé lén skráð á viðskiptavininn birtist hnappurinn **Sækja af `<lén>`** á
+vefsíðuflipanum. Hann les síðuna og tekur af henni kjörorð, lýsingu, síma,
+netfang, einkennislit og verðskrá.
+
+Útlitið er ekki tekið — það er einmitt tilgangurinn.
+
+Innflutningur skrifar aldrei yfir reit sem þú hefur þegar fyllt út, og verðskrá
+er aðeins flutt inn ef enginn þjónustulisti er til fyrir. Það sem fannst ekki er
+sagt berum orðum í staðinn fyrir að vera þagað yfir.
+
+## Útlitstillögur
 
 Þegar uppsetningarhjálpin klárast eru smíðaðar **þrjár fullbúnar vefsíður** úr
 sama efni — ekki þrjú litaþemu, heldur þrjár ólíkar hönnunarákvarðanir:
@@ -203,6 +410,13 @@ fengið hann.
 
 ## Tengingar
 
+Allar tengingar eru settar upp á **`/stillingar`** í stjórnborðinu. Þar er
+hverri þjónustu lýst, uppsetningarskrefin standa við hliðina á reitunum sem þau
+skila, og staðan sést strax.
+
+Ekkert þarf að setja í skrár. Gildin eru geymd í gagnagrunninum, leyndarmál
+dulkóðuð með AES-256-GCM, og breytingar taka gildi án endurræsingar.
+
 | Þjónusta | Til hvers | Vantar hana? |
 | --- | --- | --- |
 | Google Calendar | Bókanir í dagatal, einkatímar loka á bókanir | Bókanir virka, engin samstilling |
@@ -210,6 +424,21 @@ fengið hann.
 | Twilio | Símsvörun og SMS | Símsvörun óvirk, SMS í þurrkeyrslu |
 | Expo | Tilkynningar í app | Tilkynningar skráðar en ekki sendar |
 | Anthropic | Tillögur og textagerð | Tilbúnar tillögur notaðar |
+
+Umhverfisbreytur virka áfram fyrir hýsingu (sjá `.env.example`). Gildi sem er
+slegið inn í stjórnborðinu hefur forgang — sá sem fyllir út reit býst við að
+það gildi, ekki að breyta sem var sett fyrir mánuðum síðan yfirtaki það.
+
+### Í hvaða röð borgar sig að tengja
+
+1. **Ekkert** — kerfið er fullnothæft í þurrkeyrslu. Prófaðu allt bókunarferlið fyrst.
+2. **SMTP** — mest virði fyrir minnsta fyrirhöfn. Staðfestingar og áminningar
+   fara að berast. Gmail app-lykilorð tekur fimm mínútur.
+3. **Google Calendar** — næst mest virði. Krefst OAuth-uppsetningar í Google
+   Cloud Console, um fimmtán mínútur, gert einu sinni fyrir alla viðskiptavini.
+4. **Anthropic** — ein lína, ef þú vilt tillögur fyrir naglastofur og hárgreiðslu.
+5. **Twilio** — flóknast, því vefkrókar þurfa að ná í vélina utan frá. Skildu
+   það eftir þar til hitt er komið í gagnið.
 
 ### Tölvupóstur á eigin léni
 
@@ -227,6 +456,28 @@ fjarlægja alla hina fyrirhöfnina:
 SPF er stillt á `~all` en ekki `-all`: lítil fyrirtæki senda alltaf póst úr
 óvæntum áttum (bókhaldskerfi, vefform) og hörð höfnun eyðir slíkum póstum
 þegjandi. DMARC er `quarantine`, sem gefur öryggið án þess að henda pósti.
+
+### Þegar prófunarpóstur mistekst
+
+Undir **Stillingar → Tengingar** er hnappurinn *Senda prófunarpóst*. Mistakist
+sendingin birtist niðurstaðan á sömu síðu: hvað þarf að laga, og undir
+*Svar þjónsins* nákvæmlega það sem póstþjónninn sagði.
+
+Langalgengasta orsökin er Gmail. Google hafnar venjulegu lykilorði reikningsins
+fyrir SMTP og svarar `535 5.7.8 Username and Password not accepted`. Lausnin er
+alltaf sú sama:
+
+1. Kveiktu á **tveggja þátta auðkenningu** á Google-reikningnum — app-lykilorð
+   eru ekki í boði án hennar.
+2. Farðu á [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
+   og búðu til nýtt app-lykilorð.
+3. Límdu 16 stafa lykilorðið í **Lykilorð**, með fullt netfang í
+   **Notandanafn** og sama netfang í **Sendandanetfang**.
+
+Hinar villurnar sem kerfið þekkir og gefur ráð við: lokað port eða eldveggur
+(`ETIMEDOUT`), rangt stafað þjónsheiti (`ENOTFOUND`), Proton Bridge ekki í gangi
+(`ECONNREFUSED`), TLS-stilling sem passar ekki við portið (465 vill *TLS strax*,
+587 vill STARTTLS), og sendandanetfang sem þjónninn leyfir ekki (`550`).
 
 ### Símsvörun
 
@@ -269,6 +520,9 @@ src/
 ├── admin/           Stjórnborðið
 ├── publicapi/       Bókunarviðmót vefsíðna
 └── mobileapi/       Viðmót snjallsímaappsins
+
+src/desktop/         Ræsing sem skjáborðsforrit (gagnamappa, port, vafri)
+build/make-exe.mjs   Smíðar keyrsluskrá: esbuild → SEA-blob → Node-keyrslu
 
 mobile/              Expo-app fyrir iOS og Android
 tests/               139 prófanir

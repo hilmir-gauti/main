@@ -8,7 +8,7 @@
 
 import { all, get } from '../core/db.ts';
 import { ValidationError, isAppError } from '../core/errors.ts';
-import { html, raw, type SafeHtml } from '../core/html.ts';
+import { html, jsonScript, raw, type SafeHtml } from '../core/html.ts';
 import { formatKennitala, normalizePhone } from '../core/iceland.ts';
 import { logger } from '../core/logger.ts';
 import {
@@ -25,8 +25,9 @@ import {
   type Weekday,
 } from '../core/time.ts';
 import { upcomingHolidays } from '../core/holidays.ts';
-import { config, integrationStatus } from '../config.ts';
-import { SESSION_COOKIE, login, logout } from '../domain/auth.ts';
+import { config, integrationStatus, useSecureCookies } from '../config.ts';
+import { buildInfo, buildLabel } from '../version.ts';
+import { SESSION_COOKIE, login, logout, operatorCount } from '../domain/auth.ts';
 import {
   bookingStats,
   bookingsOnDate,
@@ -39,10 +40,13 @@ import {
   markNoShow,
   upcomingBookings,
 } from '../domain/booking/bookings.ts';
-import { listServices, listStaff, updateService } from '../domain/catalog.ts';
+import { createService, listServices, listStaff, updateService } from '../domain/catalog.ts';
 import { flowForIndustry, flowSummary } from '../domain/intake/flows.ts';
 import { bookingAnswerSummary } from '../domain/intake/service.ts';
-import { INDUSTRIES, industryPreset } from '../domain/industries.ts';
+import { INDUSTRIES, industryLabel, industryPreset } from '../domain/industries.ts';
+import { lookupCompanyProfile } from '../domain/lookup.ts';
+import { brandColorForIndustry } from '../website/palette-defaults.ts';
+import { importSite } from '../website/import.ts';
 import {
   activateTenant,
   listTasks,
@@ -60,20 +64,26 @@ import {
   validateTenantInput,
 } from '../domain/tenants.ts';
 import { FEATURES, FEATURE_LABELS, type Feature } from '../domain/types.ts';
+import { SETTING_KEYS, saveSettings } from '../domain/settings.ts';
 import { buildEmailPlan, verifyEmailDns, type EmailProvider } from '../integrations/email/provisioning.ts';
-import { listMessages } from '../integrations/email/mailer.ts';
+import { listMessages, testSmtpConnection } from '../integrations/email/mailer.ts';
+import { checkSmtpSettings, diagnoseSmtpError } from '../integrations/email/diagnose.ts';
+import { recordSmtpTest, lastSmtpTest } from '../domain/settings.ts';
 import { buildAuthUrl, exchangeCode, isCalendarLinked, parseState, saveGoogleAccount, unlinkGoogleAccount } from '../integrations/google/oauth.ts';
 import { calendarStatus, syncBusyBlocks } from '../integrations/google/calendar.ts';
 import { createPairingInvite, listDevices, pendingInvite } from '../integrations/push/devices.ts';
 import { listNotifications } from '../integrations/push/expo.ts';
 import { webhookUrls } from '../integrations/twilio.ts';
 import { csrfProtect, loadSession, requireOperator } from '../http/middleware.ts';
-import { htmlResponse, redirect, serializeCookie, withCookie } from '../http/response.ts';
+import { htmlResponse, json, redirect, serializeCookie, withCookie } from '../http/response.ts';
 import { Router } from '../http/router.ts';
 import type { RequestContext } from '../http/context.ts';
 import { chosenVariant, generateVariants, latestBuild, listVariants, publishVariant } from '../website/generator.ts';
+import { deployPublishedSite, hostingStatus } from '../website/hosting.ts';
 import { servePreview } from '../publicapi/routes.ts';
-import { csrfField, emptyState, money, page, statCard, statusTag, when } from './layout.ts';
+import { csrfField, emptyState, icon, money, page, statCard, statusTag, when } from './layout.ts';
+import { registerFirstRun } from './firstrun.ts';
+import { integrationsView } from './integrations.ts';
 
 const WEEKDAY_LABELS: Record<Weekday, string> = {
   1: 'Mánudagur', 2: 'Þriðjudagur', 3: 'Miðvikudagur', 4: 'Fimmtudagur',
@@ -108,9 +118,23 @@ function tenantTabs(tenantId: string, active: string): SafeHtml {
   </div>`;
 }
 
+function settingsTabs(active: string): SafeHtml {
+  const tabs = [
+    { key: 'tengingar', label: 'Tengingar', href: '/stillingar' },
+    { key: 'kerfi', label: 'Kerfið', href: '/stillingar/kerfi' },
+  ];
+  return html`<div class="tabs">
+    ${tabs.map((tab) => html`<a href="${tab.href}" class="${tab.key === active ? 'is-active' : ''}">${tab.label}</a>`)}
+  </div>`;
+}
+
 export function adminRouter(): Router {
   const router = new Router();
   router.use(loadSession);
+
+  // The packaged desktop build has no terminal, so the very first account is
+  // created through the browser instead of a setup script.
+  registerFirstRun(router);
 
   // =======================================================================
   // Authentication
@@ -118,6 +142,8 @@ export function adminRouter(): Router {
 
   router.get('/innskraning', (ctx) => {
     if (ctx.session) return redirect('/stjornbord');
+    // Nothing to log into yet — send them to first-run setup.
+    if (operatorCount() === 0) return redirect('/uppsetning');
     return htmlResponse(loginPage(ctx.query.get('next') ?? '/stjornbord', null));
   });
 
@@ -133,7 +159,7 @@ export function adminRouter(): Router {
 
       const cookie = serializeCookie(SESSION_COOKIE, result.sessionToken, {
         maxAgeSec: config.operator.sessionTtlHours * 3600,
-        secure: config.isProduction,
+        secure: useSecureCookies(),
         sameSite: 'Lax',
       });
       return withCookie(redirect(next), cookie);
@@ -321,6 +347,15 @@ export function adminRouter(): Router {
       wizardForm(ctx, {}, {}),
     )), guard);
 
+  /**
+   * Company lookup for the wizard. Returns JSON rather than re-rendering, so
+   * whatever the operator has already typed is never thrown away by a reload.
+   */
+  router.post('/vidskiptavinir/uppfletting', async (ctx) => {
+    const outcome = await lookupCompanyProfile(ctx.form().kennitala ?? '', { industryLabel });
+    return json(outcome);
+  }, guardWrite);
+
   router.post('/vidskiptavinir/nyr', (ctx) => {
     const form = ctx.form();
     const input = {
@@ -334,7 +369,7 @@ export function adminRouter(): Router {
       address: form.heimilisfang ?? '',
       postcode: form.postnumer ?? '',
       about: form.lysing ?? '',
-      brandColor: form.litur || '#1d4ed8',
+      brandColor: brandColorForIndustry(form.fag ?? 'annad'),
       notes: form.athugasemd ?? '',
     };
 
@@ -527,6 +562,7 @@ export function adminRouter(): Router {
     const variants = listVariants(tenant.id);
     const chosen = chosenVariant(tenant.id);
     const build = latestBuild(tenant.id);
+    const hosting = hostingStatus(tenant.id);
 
     return htmlResponse(
       page(
@@ -538,10 +574,21 @@ export function adminRouter(): Router {
               <h1>Veldu útlit</h1>
               <p class="sub">Þrjár fullbúnar tillögur með sama efni. Smelltu til að skoða í fullri stærð og veldu svo þá sem passar.</p>
             </div>
-            <form method="post" action="/vidskiptavinir/${tenant.id}/vefur/endurgera">
-              ${csrfField(ctx.session)}
-              <button class="btn btn-ghost" type="submit">Endurgera tillögur</button>
-            </form>
+            <div class="btn-row">
+              ${tenant.websiteDomain
+                ? html`<form method="post" action="/vidskiptavinir/${tenant.id}/vefur/flytja-inn">
+                    ${csrfField(ctx.session)}
+                    <button class="btn btn-ghost" type="submit"
+                            title="Sækir texta, liti, verðskrá og tengiliði af ${tenant.websiteDomain}">
+                      Sækja af ${tenant.websiteDomain}
+                    </button>
+                  </form>`
+                : ''}
+              <form method="post" action="/vidskiptavinir/${tenant.id}/vefur/endurgera">
+                ${csrfField(ctx.session)}
+                <button class="btn btn-ghost" type="submit">Endurgera tillögur</button>
+              </form>
+            </div>
           </div>
 
           ${tenantTabs(tenant.id, 'vefur')}
@@ -554,6 +601,30 @@ export function adminRouter(): Router {
                   <span class="muted small">${when(build.built_at)}</span>
                   <a class="btn btn-ghost btn-sm" href="/v/${tenant.slug}" target="_blank" rel="noopener">Opna vefsíðu</a>
                 </div>
+
+                <div class="split" style="margin-top:.9rem;padding-top:.9rem;border-top:1px solid var(--border)">
+                  ${hosting
+                    ? html`
+                      <span class="tag ${hosting.stale ? 'tag-bad' : 'tag-ok'}">
+                        ${hosting.stale ? 'Úrelt á Vercel' : 'Í loftinu á Vercel'}
+                      </span>
+                      <a class="btn btn-ghost btn-sm" href="${hosting.url}" target="_blank" rel="noopener">${hosting.url}</a>
+                      <span class="muted small">${hosting.deployedAt ? when(hosting.deployedAt) : ''}</span>`
+                    : html`<span class="muted small">
+                        ${config.vercel.enabled
+                          ? 'Ekki komin á ytri hýsingu — vefsíðan er aðeins aðgengileg héðan.'
+                          : 'Ytri hýsing er óstillt. Bættu við VERCEL_TOKEN undir Tengingar til að setja vefinn í loftið á eigin léni.'}
+                      </span>`}
+
+                  ${config.vercel.enabled
+                    ? html`<form method="post" action="/vidskiptavinir/${tenant.id}/vefur/hysing">
+                        ${csrfField(ctx.session)}
+                        <button class="btn ${hosting && !hosting.stale ? 'btn-ghost' : 'btn-primary'} btn-sm" type="submit">
+                          ${hosting ? 'Senda aftur á Vercel' : 'Setja í loftið á Vercel'}
+                        </button>
+                      </form>`
+                    : ''}
+                </div>
               </div>`
             : ''}
 
@@ -562,16 +633,15 @@ export function adminRouter(): Router {
             : html`<div class="grid grid-3">
                 ${variants.map(
                   (variant) => html`
-                    <div class="panel" style="${chosen?.variant === variant.variant ? 'border-color:var(--brand);box-shadow:0 0 0 1px var(--brand)' : ''}">
+                    <div class="variant ${chosen?.variant === variant.variant ? 'is-chosen' : ''}">
                       <div class="split" style="justify-content:space-between">
                         <h3 style="margin:0">${variant.label}</h3>
                         ${chosen?.variant === variant.variant ? html`<span class="tag tag-ok">Valið</span>` : ''}
                       </div>
                       <p class="small muted">${variant.description}</p>
-                      <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff;height:340px">
+                      <div class="variant-frame">
                         <iframe src="/forskodun/${tenant.id}/${variant.variant}"
                                 title="Forskoðun — ${variant.label}"
-                                style="width:200%;height:200%;border:0;transform:scale(.5);transform-origin:0 0"
                                 loading="lazy" sandbox="allow-scripts"></iframe>
                       </div>
                       <div class="btn-row" style="margin-top:.85rem">
@@ -595,6 +665,91 @@ export function adminRouter(): Router {
     const result = publishVariant(tenantId, variant);
     setTaskStatus(tenantId, 'vefsida', 'lokid', `Birt: ${result.url}`);
     return redirect(withFlash(`/vidskiptavinir/${tenantId}/vefur`, `Vefsíðan er komin í loftið á ${result.url}`));
+  }, guardWrite);
+
+  /** Pushes the published build to Vercel. Separate from choosing a design. */
+  router.post('/vidskiptavinir/:id/vefur/hysing', async (ctx) => {
+    const tenantId = ctx.params.id ?? '';
+    const target = `/vidskiptavinir/${tenantId}/vefur`;
+
+    try {
+      const result = await deployPublishedSite(tenantId);
+
+      if (result.pendingDns.length > 0) {
+        // The site is live on the Vercel URL either way; the domain is what is
+        // waiting. Saying only "published" would hide the remaining step.
+        return redirect(withFlash(
+          target,
+          `Vefsíðan er í loftinu á ${result.url}. Lénið bíður DNS-færslna: ${result.pendingDns.join(' — ')}`,
+          'upplysing',
+        ));
+      }
+
+      return redirect(withFlash(target, `Vefsíðan er komin í loftið á ${result.domain || result.url}`));
+    } catch (error) {
+      // The flash already names the provider, so the `[vercel]` tag that
+      // IntegrationError prepends would only be noise here.
+      const message = (error instanceof Error ? error.message : String(error)).replace(/^\[vercel\]\s*/, '');
+      return redirect(withFlash(target, `Birting á Vercel mistókst: ${message}`, 'villa'));
+    }
+  }, guardWrite);
+
+  /**
+   * Lifts content off the company's existing website.
+   *
+   * Applied to empty fields only. An operator who has already written a
+   * tagline meant it, and an import is a guess by comparison — it proposes,
+   * it does not overwrite.
+   */
+  router.post('/vidskiptavinir/:id/vefur/flytja-inn', async (ctx) => {
+    const tenantId = ctx.params.id ?? '';
+    const tenant = getTenantOrThrow(tenantId);
+    const target = `/vidskiptavinir/${tenantId}/vefur`;
+
+    if (!tenant.websiteDomain) {
+      return redirect(withFlash(target, 'Ekkert lén er skráð á viðskiptavininn.', 'villa'));
+    }
+
+    const imported = await importSite(tenant.websiteDomain);
+    if (!imported) {
+      return redirect(withFlash(target, `Náði ekki í ${tenant.websiteDomain} eða síðan skilaði ekki HTML.`, 'villa'));
+    }
+
+    const patch: Record<string, unknown> = {};
+    const taken: string[] = [];
+
+    if (!tenant.tagline && imported.tagline) { patch.tagline = imported.tagline; taken.push('kjörorð'); }
+    if (!tenant.about && imported.about) { patch.about = imported.about; taken.push('lýsing'); }
+    if (!tenant.phone && imported.phone) { patch.phone = imported.phone; taken.push('sími'); }
+    if (!tenant.email && imported.email) { patch.email = imported.email; taken.push('netfang'); }
+    if (imported.brandColor) { patch.brandColor = imported.brandColor; taken.push('einkennislitur'); }
+
+    if (Object.keys(patch).length > 0) updateTenant(tenantId, patch);
+
+    // Prices are only added when there is no catalogue yet: merging a scraped
+    // price list into services the operator has already priced would be a
+    // silent overwrite of real numbers.
+    let addedServices = 0;
+    if (imported.services.length > 0 && listServices(tenantId).length === 0) {
+      for (const service of imported.services.slice(0, 20)) {
+        try {
+          createService(tenantId, { name: service.name, priceIsk: service.priceIsk, durationMin: 60 });
+          addedServices++;
+        } catch {
+          // A name the catalogue rejects is skipped rather than failing the import.
+        }
+      }
+      if (addedServices > 0) taken.push(`${addedServices} þjónustuliðir`);
+    }
+
+    const built = generateVariants(tenantId);
+
+    const summary = taken.length > 0
+      ? `Sótt af ${imported.url}: ${taken.join(', ')}. ${built.length} tillögur endurgerðar.`
+      : `Ekkert nýtt fannst á ${imported.url} — reitirnir eru þegar fylltir. ${built.length} tillögur endurgerðar.`;
+
+    return redirect(withFlash(target, imported.notes.length > 0 ? `${summary} ${imported.notes.join(' ')}` : summary,
+      taken.length > 0 ? 'gott' : 'upplysing'));
   }, guardWrite);
 
   router.post('/vidskiptavinir/:id/vefur/endurgera', (ctx) => {
@@ -1016,10 +1171,6 @@ export function adminRouter(): Router {
                   <label for="lysing">Um okkur</label>
                   <textarea id="lysing" name="lysing" rows="4">${tenant.about}</textarea>
                 </div>
-                <div class="field">
-                  <label for="litur">Einkennislitur</label>
-                  <input id="litur" name="litur" type="text" value="${tenant.brandColor}" placeholder="#1d4ed8">
-                </div>
               </div>
 
               <div class="panel">
@@ -1102,7 +1253,7 @@ export function adminRouter(): Router {
         address: form.heimilisfang,
         postcode: form.postnumer,
         about: form.lysing,
-        brandColor: form.litur,
+
         slotGranularityMin: Number(form.bil),
         minNoticeMin: Number(form.fyrirvari),
         maxAdvanceDays: Number(form.hamark),
@@ -1198,37 +1349,117 @@ export function adminRouter(): Router {
   // Platform settings
   // =======================================================================
 
-  router.get('/stillingar', (ctx) => {
+  router.get('/stillingar', (ctx) =>
+    htmlResponse(
+      page(
+        { title: 'Tengingar', session: ctx.session, active: 'stillingar', flash: flashFrom(ctx), wide: true },
+        html`
+          ${settingsTabs('tengingar')}
+          ${integrationsView(ctx.session, lastSmtpTest())}`,
+      ),
+    ), guard);
+
+  router.post('/stillingar/tengingar', (ctx) => {
+    const form = ctx.form();
+    const values: Record<string, string> = {};
+
+    for (const key of SETTING_KEYS) {
+      // Unchecked checkboxes are absent from the submission, which for a
+      // toggle means "false" rather than "leave unchanged".
+      if (key === 'SMTP_IMPLICIT_TLS' || key === 'PUSH_ENABLED') {
+        values[key] = form[key] === 'true' ? 'true' : 'false';
+      } else if (key in form) {
+        values[key] = form[key] ?? '';
+      }
+    }
+
+    const result = saveSettings(values);
+    return redirect(
+      withFlash(
+        '/stillingar',
+        result.saved.length > 0
+          ? `Tengingar vistaðar (${result.saved.length} gildi uppfærð).`
+          : 'Engar breytingar.',
+      ),
+    );
+  }, guardWrite);
+
+  /** Saves first, then sends a real message through the configured server. */
+  router.post('/stillingar/profa-post', async (ctx) => {
+    const form = ctx.form();
+    const values: Record<string, string> = {};
+    for (const key of SETTING_KEYS) {
+      if (key === 'SMTP_IMPLICIT_TLS' || key === 'PUSH_ENABLED') {
+        values[key] = form[key] === 'true' ? 'true' : 'false';
+      } else if (key in form) {
+        values[key] = form[key] ?? '';
+      }
+    }
+    saveSettings(values);
+
+    const recipient = ctx.session?.email ?? '';
+    if (!recipient) {
+      return redirect(withFlash('/stillingar', 'Ekkert netfang til að senda á.', 'villa'));
+    }
+
+    const result = await testSmtpConnection(null, recipient);
+
+    // The full detail is stored rather than squeezed into a redirect, so the
+    // page can show the server's own words next to what to do about them.
+    recordSmtpTest({
+      at: Date.now(),
+      status: result.status,
+      recipient,
+      error: result.error ?? '',
+      host: config.smtp.host,
+      warnings: checkSmtpSettings({
+        host: config.smtp.host,
+        port: config.smtp.port,
+        user: config.smtp.user,
+        fromEmail: config.smtp.fromEmail,
+        implicitTls: config.smtp.implicitTls,
+      }),
+    });
+
+    if (result.status === 'sent') {
+      return redirect(withFlash('/stillingar', `Prófunarpóstur sendur á ${recipient}. Athugaðu pósthólfið (og ruslpóst).`));
+    }
+    if (result.status === 'thurrkeyrsla') {
+      return redirect(withFlash('/stillingar', 'SMTP er ekki fullstillt — fylltu út þjón og sendandanetfang.', 'upplysing'));
+    }
+
+    const diagnosis = diagnoseSmtpError(result.error ?? '', config.smtp.host);
+    return redirect(
+      withFlash('/stillingar', diagnosis ? diagnosis.title : 'Sending mistókst — sjá nánar hér að neðan.', 'villa'),
+    );
+  }, guardWrite);
+
+  /** Environment and diagnostics, kept separate from the credential forms. */
+  router.get('/stillingar/kerfi', (ctx) => {
     const tenants = listTenants();
     const notifications = tenants.flatMap((tenant) => listNotifications(tenant.id, 10));
 
     return htmlResponse(
       page(
-        { title: 'Stillingar', session: ctx.session, active: 'stillingar', flash: flashFrom(ctx) },
+        { title: 'Kerfið', session: ctx.session, active: 'stillingar', flash: flashFrom(ctx) },
         html`
-          <div class="head"><div><h1>Stillingar kerfisins</h1><p class="sub">Tengingar og umhverfi.</p></div></div>
+          ${settingsTabs('kerfi')}
+
+          <div class="head"><div><h1>Kerfið</h1><p class="sub">Umhverfi og staða.</p></div></div>
+
+          ${buildInfo.packaged
+            ? html`<div class="flash flash-upplysing" style="margin-bottom:1.2rem">
+                ${icon('M12 16v-5M12 8.5v.5M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18z', 18)}
+                <span>Þetta er keyrsluskrá. Hún uppfærist ekki sjálf — keyrðu
+                <span class="mono">git pull</span> og <span class="mono">npm run exe</span>
+                til að fá nýja útgáfu.</span>
+              </div>`
+            : ''}
 
           <div class="panel">
-            <h2>Tengingar</h2>
-            <div class="table-wrap"><table>
-              <thead><tr><th>Þjónusta</th><th>Staða</th><th>Athugasemd</th></tr></thead>
-              <tbody>${integrationStatus().map((item) => html`
-                <tr>
-                  <td><strong>${item.label}</strong></td>
-                  <td>${item.ready ? statusTag('lokid') : html`<span class="tag tag-warn">Óstillt</span>`}</td>
-                  <td class="small muted">${item.hint}</td>
-                </tr>`)}
-              </tbody></table></div>
-            <p class="small muted" style="margin-top:1rem">
-              Tengingar eru stilltar með umhverfisbreytum. Sjá <span class="mono">.env.example</span> í verkefninu.
-              Þegar tenging vantar fer viðkomandi þjónusta í <strong>þurrkeyrslu</strong>: allt er skráð eins og venjulega
-              en ekkert er sent út, svo hægt er að prófa kerfið til fulls án reikninga.
-            </p>
-          </div>
-
-          <div class="panel" style="margin-top:1rem">
             <h2>Umhverfi</h2>
             <div class="table-wrap"><table><tbody>
+              <tr><td>Útgáfa</td><td class="mono">${buildLabel()}</td></tr>
               <tr><td>Slóð</td><td class="mono">${config.baseUrl}</td></tr>
               <tr><td>Umhverfi</td><td class="mono">${config.env}</td></tr>
               <tr><td>Gagnagrunnur</td><td class="mono">${config.databasePath}</td></tr>
@@ -1236,6 +1467,9 @@ export function adminRouter(): Router {
               <tr><td>Tímabelti</td><td class="mono">${config.defaults.timezone}</td></tr>
               <tr><td>Áminning</td><td class="mono">${config.booking.reminderHoursBefore} klst. fyrir tíma</td></tr>
             </tbody></table></div>
+            <p class="small muted" style="margin-top:1rem">
+              Taktu afrit af möppunni sem gagnagrunnurinn er í — hún geymir allt kerfið.
+            </p>
           </div>
 
           <div class="panel" style="margin-top:1rem">
@@ -1280,13 +1514,30 @@ function numberField(name: string, label: string, value: number, min: number, ma
 
 function loginPage(next: string, error: string | null): SafeHtml {
   return page(
-    { title: 'Innskráning', session: null },
+    { title: 'Innskráning', session: null, bare: true },
     html`
-      <div style="max-width:24rem;margin:8vh auto 0">
-        <div class="panel">
-          <h1 style="text-align:center">Rafræn Þjónusta</h1>
-          <p class="sub muted" style="text-align:center;margin-bottom:1.5rem">Stjórnborð</p>
-          ${error ? html`<div class="flash flash-villa">${error}</div>` : ''}
+      <div class="auth-shell">
+        <div class="auth-brand">
+          <div class="auth-mark">RÞ</div>
+          <h1>Rafræn Þjónusta</h1>
+          <p>
+            Stjórnborð fyrir stafræna þjónustu við íslensk smáfyrirtæki —
+            vefsíður, bókanir, tölvupóst og símsvörun.
+          </p>
+          <ul class="auth-points">
+            <li><strong>Vefsíður</strong> — þrjár tillögur, þú velur</li>
+            <li><strong>Bókanir</strong> — spurningaflæði eftir fagi</li>
+            <li><strong>Tölvupóstur</strong> — DNS-færslur og eftirlit</li>
+            <li><strong>Símsvörun</strong> — svarar á íslensku</li>
+          </ul>
+        </div>
+
+        <div class="auth-card">
+          <h2>Innskráning</h2>
+          <p class="muted">Sláðu inn aðganginn þinn til að halda áfram.</p>
+
+          ${error ? html`<div class="flash flash-villa">${icon('M12 8v5M12 16.5v.5M10.3 3.9 2.6 17.2A2 2 0 0 0 4.3 20h15.4a2 2 0 0 0 1.7-2.8L13.7 3.9a2 2 0 0 0-3.4 0z', 18)}<span>${error}</span></div>` : ''}
+
           <form method="post" action="/innskraning">
             <input type="hidden" name="next" value="${next}">
             <div class="field">
@@ -1297,8 +1548,13 @@ function loginPage(next: string, error: string | null): SafeHtml {
               <label for="lykilord">Lykilorð</label>
               <input id="lykilord" name="lykilord" type="password" autocomplete="current-password" required>
             </div>
-            <button class="btn btn-primary" type="submit" style="width:100%">Skrá inn</button>
+            <button class="btn btn-primary btn-block" type="submit">Skrá inn</button>
           </form>
+
+          <p class="auth-foot">
+            Gögnin þín eru geymd á þessari tölvu. Ekkert fer í skýið nema það
+            sem þú tengir sjálf/ur.
+          </p>
         </div>
       </div>`,
   );
@@ -1355,10 +1611,33 @@ function taskPayload(tenantId: string, key: string, payload: Record<string, unkn
   return html``;
 }
 
-/** The onboarding wizard: one page, sensible defaults, everything editable later. */
+/**
+ * The onboarding wizard: one page, sensible defaults, everything editable later.
+ *
+ * Both the staff list and the capacity input are rendered up front and toggled
+ * client-side by the trade selector. The obvious alternative — re-submitting
+ * the form when the trade changes — throws away everything already typed and
+ * greets the operator with validation errors for fields they have not reached
+ * yet, so it is worth the twenty lines of inline script to avoid.
+ */
 function wizardForm(ctx: RequestContext, values: Record<string, string>, errors: Record<string, string>): SafeHtml {
-  const industry = values.fag ?? 'hargreidslustofa';
-  const preset = industryPreset(industry);
+  const selected = values.fag ?? 'hargreidslustofa';
+  const firstRender = values.nafn === undefined;
+  const checked = ctx.formList('eiginleikar');
+
+  /** Per-trade facts the inline script uses to update the live summary. */
+  const facts = Object.fromEntries(
+    INDUSTRIES.map((entry) => [
+      entry.key,
+      {
+        label: entry.label,
+        staffled: entry.staffled,
+        thjonustur: entry.services.length,
+        spurningar: flowSummary(entry.key).total,
+        starfsheiti: entry.defaultStaffTitle,
+      },
+    ]),
+  );
 
   const field = (name: string, label: string, options: { type?: string; help?: string; placeholder?: string } = {}) => html`
     <div class="field">
@@ -1377,28 +1656,40 @@ function wizardForm(ctx: RequestContext, values: Record<string, string>, errors:
       </div>
     </div>
 
-    <form method="post" action="/vidskiptavinir/nyr">
+    <form method="post" action="/vidskiptavinir/nyr" id="wizard">
       ${csrfField(ctx.session)}
 
       <div class="grid grid-2">
         <div class="panel">
           <h2>1 · Fyrirtækið</h2>
           ${field('nafn', 'Nafn fyrirtækis', { placeholder: 'Hárstofan Ösp' })}
+
           <div class="field">
             <label for="fag">Fag</label>
-            <select id="fag" name="fag" onchange="this.form.submit()">
+            <select id="fag" name="fag">
               ${INDUSTRIES.map((entry) => html`
-                <option value="${entry.key}" ${entry.key === industry ? 'selected' : ''}>${entry.emoji} ${entry.label}</option>`)}
+                <option value="${entry.key}" ${entry.key === selected ? 'selected' : ''}>${entry.emoji} ${entry.label}</option>`)}
             </select>
             <p class="help">Ræður þjónustulista, opnunartíma, spurningaflæði og útlitstillögum.</p>
           </div>
-          ${field('kennitala', 'Kennitala', { placeholder: '000000-0000' })}
+
+          <div class="field">
+            <label for="kennitala">Kennitala</label>
+            <div class="lookup-row">
+              <input id="kennitala" name="kennitala" type="text" placeholder="000000-0000"
+                     value="${values.kennitala ?? ''}" autocomplete="off">
+              <button class="btn btn-ghost" type="button" id="uppfletting">Sækja upplýsingar</button>
+            </div>
+            <p class="help">Sækir nafn, heimilisfang og fag úr fyrirtækjaskrá, og lén, síma og netfang úr lénaskrá.</p>
+            ${errors.kennitala ? html`<p class="error-text">${errors.kennitala}</p>` : ''}
+            <div id="uppfletting-svar" hidden></div>
+          </div>
           ${field('netfang', 'Netfang', { type: 'email' })}
           ${field('simi', 'Símanúmer', { placeholder: '555 1234' })}
           ${field('len', 'Lén', { placeholder: 'stofan.is', help: 'Ef lénið er ekki til ennþá má sleppa því.' })}
           ${field('heimilisfang', 'Heimilisfang')}
           ${field('postnumer', 'Póstnúmer', { placeholder: '101' })}
-          ${field('litur', 'Einkennislitur', { placeholder: '#1d4ed8', help: 'Notaður á vefsíðunni og í tölvupósti.' })}
+
           <div class="field">
             <label for="lysing">Lýsing á fyrirtækinu</label>
             <textarea id="lysing" name="lysing" rows="4"
@@ -1414,7 +1705,7 @@ function wizardForm(ctx: RequestContext, values: Record<string, string>, errors:
               ${FEATURES.map((feature) => html`
                 <label class="check">
                   <input type="checkbox" name="eiginleikar" value="${feature}"
-                         ${values.nafn === undefined || ctx.formList('eiginleikar').includes(feature) ? 'checked' : ''}>
+                         ${firstRender || checked.includes(feature) ? 'checked' : ''}>
                   <span><strong>${FEATURE_LABELS[feature].label}</strong><span>${FEATURE_LABELS[feature].description}</span></span>
                 </label>`)}
             </div>
@@ -1422,20 +1713,20 @@ function wizardForm(ctx: RequestContext, values: Record<string, string>, errors:
 
           <div class="panel" style="margin-top:1rem">
             <h2>3 · Um reksturinn</h2>
-            ${preset.staffled
-              ? html`
-                <div class="field">
-                  <label for="starfsfolk">Starfsfólk sem tekur bókanir</label>
-                  <textarea id="starfsfolk" name="starfsfolk" rows="4" placeholder="Eitt nafn í hverri línu">${values.starfsfolk ?? ''}</textarea>
-                  <p class="help">Hver fær sitt eigið dagatal og lausa tíma. Má sleppa og bæta við síðar.</p>
-                </div>`
-              : html`
-                <div class="field">
-                  <label for="afkastageta">Hversu mörg verk geta verið í gangi samtímis?</label>
-                  <input id="afkastageta" name="afkastageta" type="number" min="1" max="20"
-                         value="${values.afkastageta ?? '2'}">
-                  <p class="help">Til dæmis fjöldi lyfta á verkstæði eða vinnuborða á stofu.</p>
-                </div>`}
+
+            <div class="field" data-when="staffled">
+              <label for="starfsfolk">Starfsfólk sem tekur bókanir</label>
+              <textarea id="starfsfolk" name="starfsfolk" rows="4"
+                        placeholder="Eitt nafn í hverri línu">${values.starfsfolk ?? ''}</textarea>
+              <p class="help">Hver fær sitt eigið dagatal og lausa tíma. Má sleppa og bæta við síðar.</p>
+            </div>
+
+            <div class="field" data-when="pool">
+              <label for="afkastageta">Hversu mörg verk geta verið í gangi samtímis?</label>
+              <input id="afkastageta" name="afkastageta" type="number" min="1" max="20"
+                     value="${values.afkastageta ?? '2'}">
+              <p class="help">Til dæmis fjöldi lyfta á verkstæði eða vinnuborða á stofu.</p>
+            </div>
 
             <div class="field">
               <label for="postthjonusta">Póstþjónusta</label>
@@ -1455,10 +1746,10 @@ function wizardForm(ctx: RequestContext, values: Record<string, string>, errors:
 
           <div class="panel" style="margin-top:1rem">
             <h3>Þetta verður búið til</h3>
-            <ul class="small muted">
-              <li><strong>${preset.services.length}</strong> þjónustur með verði og tímalengd</li>
-              <li>Opnunartími fyrir ${preset.label.toLowerCase()}</li>
-              <li>Spurningaflæði með <strong>${flowSummary(industry).total}</strong> spurningum</li>
+            <ul class="auth-points" style="margin-top:.9rem">
+              <li><strong data-fact="thjonustur"></strong> þjónustur með verði og tímalengd</li>
+              <li>Opnunartími fyrir <strong data-fact="label"></strong></li>
+              <li>Spurningaflæði með <strong data-fact="spurningar"></strong> spurningum</li>
               <li>Þrjár fullbúnar útlitstillögur að vefsíðu</li>
               <li>Verkefnalisti með því sem þarf að klára handvirkt</li>
             </ul>
@@ -1470,5 +1761,147 @@ function wizardForm(ctx: RequestContext, values: Record<string, string>, errors:
         <button class="btn btn-primary" type="submit">Stofna og setja upp</button>
         <a class="btn btn-ghost" href="/vidskiptavinir">Hætta við</a>
       </div>
-    </form>`;
+    </form>
+
+    <script>
+      (function () {
+        var facts = ${jsonScript(facts)};
+        var select = document.getElementById('fag');
+        var form = document.getElementById('wizard');
+
+        function apply() {
+          var entry = facts[select.value];
+          if (!entry) return;
+
+          form.querySelectorAll('[data-when="staffled"]').forEach(function (node) {
+            node.hidden = !entry.staffled;
+          });
+          form.querySelectorAll('[data-when="pool"]').forEach(function (node) {
+            node.hidden = entry.staffled;
+          });
+          form.querySelectorAll('[data-fact]').forEach(function (node) {
+            node.textContent = entry[node.getAttribute('data-fact')];
+          });
+        }
+
+        select.addEventListener('change', apply);
+        apply();
+
+        // --- Company lookup by kennitala ---------------------------------
+        var SOURCE_LABEL = {
+          fyrirtaekjaskra: 'fyrirtækjaskrá',
+          isnic: 'lénaskrá',
+          gervigreind: 'gervigreind'
+        };
+
+        var fagTouched = false;
+        select.addEventListener('change', function () { fagTouched = true; });
+
+        var button = document.getElementById('uppfletting');
+        var panel = document.getElementById('uppfletting-svar');
+        var ktInput = document.getElementById('kennitala');
+
+        function note(kind, text) {
+          panel.hidden = false;
+          panel.className = 'lookup-note lookup-' + kind;
+          panel.textContent = text;
+        }
+
+        // A filled field is marked with where the value came from, so an
+        // AI-written description is never mistaken for a registry fact.
+        function markSource(name, source) {
+          var input = form.elements[name];
+          if (!input) return;
+          var wrapper = input.closest('.field');
+          if (!wrapper) return;
+
+          var existing = wrapper.querySelector('.source-tag');
+          if (existing) existing.remove();
+
+          var tag = document.createElement('span');
+          tag.className = 'source-tag source-' + source;
+          tag.textContent = SOURCE_LABEL[source] || source;
+          var label = wrapper.querySelector('label');
+          if (label) label.appendChild(tag);
+        }
+
+        async function lookup() {
+          var kennitala = ktInput.value.trim();
+          if (!kennitala) { note('bad', 'Sláðu inn kennitölu fyrst.'); return; }
+
+          button.disabled = true;
+          var original = button.textContent;
+          button.textContent = 'Leita…';
+          note('info', 'Fletti upp í fyrirtækjaskrá og lénaskrá…');
+
+          try {
+            var body = new URLSearchParams();
+            body.set('kennitala', kennitala);
+            body.set('_csrf', form.elements._csrf.value);
+
+            var response = await fetch('/vidskiptavinir/uppfletting', {
+              method: 'POST',
+              headers: { 'content-type': 'application/x-www-form-urlencoded' },
+              body: body.toString()
+            });
+            var result = await response.json();
+
+            if (!result.found) { note('bad', result.message); return; }
+
+            var filled = [];
+            Object.keys(result.profile.fields).forEach(function (name) {
+              var entry = result.profile.fields[name];
+              var input = form.elements[name];
+              if (!input) return;
+
+              // Never overwrite something already typed — the operator may
+              // know better than the register does. A <select> always reports
+              // a value (its first option), so "untouched" has to be tracked
+              // rather than inferred from emptiness.
+              var untouched = input.tagName === 'SELECT' ? !fagTouched : input.value.trim() === '';
+              if (!untouched) return;
+
+              input.value = entry.value;
+              markSource(name, entry.source);
+              filled.push(name);
+              if (name === 'fag') apply();
+            });
+
+            var lines = [];
+            lines.push(filled.length + ' reitir fylltir út.');
+            if (result.profile.legalForm) lines.push('Rekstrarform: ' + result.profile.legalForm);
+            if (result.profile.isat) lines.push('ÍSAT: ' + result.profile.isat);
+            if (result.profile.vskNumber) lines.push('VSK-númer: ' + result.profile.vskNumber);
+            result.profile.notes.forEach(function (entry) { lines.push('• ' + entry); });
+
+            note(filled.length > 0 ? 'ok' : 'info', lines.join('\\n'));
+          } catch (error) {
+            note('bad', 'Uppfletting mistókst: ' + error);
+          } finally {
+            button.disabled = false;
+            button.textContent = original;
+          }
+        }
+
+        button.addEventListener('click', lookup);
+        ktInput.addEventListener('keydown', function (event) {
+          if (event.key === 'Enter') { event.preventDefault(); lookup(); }
+        });
+      })();
+    </script>
+
+    <style>
+      .lookup-row{display:flex;gap:.5rem;align-items:stretch}
+      .lookup-row input{flex:1}
+      .lookup-note{margin-top:.6rem;padding:.7rem .85rem;border-radius:var(--r);font-size:.87rem;
+        white-space:pre-line;line-height:1.5;border:1px solid transparent}
+      .lookup-ok{background:var(--ok-soft);color:var(--ok);border-color:color-mix(in srgb,var(--ok) 25%,transparent)}
+      .lookup-info{background:var(--brand-soft);color:var(--brand);border-color:color-mix(in srgb,var(--brand) 25%,transparent)}
+      .lookup-bad{background:var(--bad-soft);color:var(--bad);border-color:color-mix(in srgb,var(--bad) 25%,transparent)}
+      .source-tag{margin-left:.45rem;padding:.1rem .42rem;border-radius:999px;font-size:.68rem;
+        font-weight:700;letter-spacing:.03em;text-transform:uppercase;vertical-align:middle}
+      .source-fyrirtaekjaskra{background:var(--ok-soft);color:var(--ok)}
+      .source-isnic{background:var(--brand-soft);color:var(--brand)}
+      .source-gervigreind{background:var(--warn-soft);color:var(--warn)}
+    </style>`;
 }
