@@ -308,6 +308,52 @@ skráningu eins viðskiptavinar, ekki leit í gegnum skrána.
 
 ## Vefsíðugerð
 
+Hver vefsíða er **ein sjálfstæð HTML-skrá** — engin utanaðkomandi leturgerð,
+ekkert hreyfimyndasafn, engin ytri skrá. Það er forsenda þess að hægt sé að
+birta hana á hraðneti og að hún opnist hratt á síma yfir 4G.
+
+Innan þeirra marka er þetta í síðunum:
+
+- **Fljótandi haus** sem þéttist og fær móðugler þegar skrunað er.
+- **Hreyfður bakgrunnur í hetjunni** og fagbundið mynstur — flæðandi þræðir
+  fyrir stofur, hringir fyrir verkstæði, hornréttar lagnir fyrir iðnaðarmenn,
+  púlslína fyrir heilsu.
+- **Efni birtist við skrun**, með stigvaxandi töf innan hvers kafla.
+- **Fastur bókunarborði** neðst á símum þegar hetjan er skrunuð úr sýn.
+- **Algengar spurningar** svaraðar úr raunverulegum stillingum viðskiptavinarins
+  — afbókunarfrestur og lágmarksfyrirvari eru tölurnar sem bókanavélin fylgir.
+
+### Hreyfingar má slökkva á
+
+Allar hreyfingar eru inni í `prefers-reduced-motion: no-preference`. Sá sem
+hefur beðið stýrikerfið um minni hreyfingu fær kyrra síðu — ekki skerta.
+
+Opinberanir eru sömuleiðis valkvæðar: klasinn sem felur efnið er settur á
+síðuna af skriftunni sjálfri. Keyri hún ekki — lokað á skriftur, gamall vafri —
+er ekkert falið og síðan er einfaldlega kyrr.
+
+### Enginn litavalsreitur
+
+Það var röng spurning. Þú ert að skrá fyrirtæki einhvers annars, veist sjaldnast
+lit þess, og niðurstaðan var að flestar síður komu út í sjálfgefna bláa litnum.
+
+Liturinn kemur núna úr tvennu, í þessari röð: **núverandi vefsíðu fyrirtækisins**
+ef hún er til, og annars **faginu** — naglastofa og pípari opna ekki í sama tón.
+
+### Sækja af núverandi vefsíðu
+
+Sé lén skráð á viðskiptavininn birtist hnappurinn **Sækja af `<lén>`** á
+vefsíðuflipanum. Hann les síðuna og tekur af henni kjörorð, lýsingu, síma,
+netfang, einkennislit og verðskrá.
+
+Útlitið er ekki tekið — það er einmitt tilgangurinn.
+
+Innflutningur skrifar aldrei yfir reit sem þú hefur þegar fyllt út, og verðskrá
+er aðeins flutt inn ef enginn þjónustulisti er til fyrir. Það sem fannst ekki er
+sagt berum orðum í staðinn fyrir að vera þagað yfir.
+
+## Útlitstillögur
+
 Þegar uppsetningarhjálpin klárast eru smíðaðar **þrjár fullbúnar vefsíður** úr
 sama efni — ekki þrjú litaþemu, heldur þrjár ólíkar hönnunarákvarðanir:
 

@@ -40,11 +40,13 @@ import {
   markNoShow,
   upcomingBookings,
 } from '../domain/booking/bookings.ts';
-import { listServices, listStaff, updateService } from '../domain/catalog.ts';
+import { createService, listServices, listStaff, updateService } from '../domain/catalog.ts';
 import { flowForIndustry, flowSummary } from '../domain/intake/flows.ts';
 import { bookingAnswerSummary } from '../domain/intake/service.ts';
 import { INDUSTRIES, industryLabel, industryPreset } from '../domain/industries.ts';
 import { lookupCompanyProfile } from '../domain/lookup.ts';
+import { brandColorForIndustry } from '../website/palette-defaults.ts';
+import { importSite } from '../website/import.ts';
 import {
   activateTenant,
   listTasks,
@@ -367,7 +369,7 @@ export function adminRouter(): Router {
       address: form.heimilisfang ?? '',
       postcode: form.postnumer ?? '',
       about: form.lysing ?? '',
-      brandColor: form.litur || '#1d4ed8',
+      brandColor: brandColorForIndustry(form.fag ?? 'annad'),
       notes: form.athugasemd ?? '',
     };
 
@@ -572,10 +574,21 @@ export function adminRouter(): Router {
               <h1>Veldu útlit</h1>
               <p class="sub">Þrjár fullbúnar tillögur með sama efni. Smelltu til að skoða í fullri stærð og veldu svo þá sem passar.</p>
             </div>
-            <form method="post" action="/vidskiptavinir/${tenant.id}/vefur/endurgera">
-              ${csrfField(ctx.session)}
-              <button class="btn btn-ghost" type="submit">Endurgera tillögur</button>
-            </form>
+            <div class="btn-row">
+              ${tenant.websiteDomain
+                ? html`<form method="post" action="/vidskiptavinir/${tenant.id}/vefur/flytja-inn">
+                    ${csrfField(ctx.session)}
+                    <button class="btn btn-ghost" type="submit"
+                            title="Sækir texta, liti, verðskrá og tengiliði af ${tenant.websiteDomain}">
+                      Sækja af ${tenant.websiteDomain}
+                    </button>
+                  </form>`
+                : ''}
+              <form method="post" action="/vidskiptavinir/${tenant.id}/vefur/endurgera">
+                ${csrfField(ctx.session)}
+                <button class="btn btn-ghost" type="submit">Endurgera tillögur</button>
+              </form>
+            </div>
           </div>
 
           ${tenantTabs(tenant.id, 'vefur')}
@@ -679,6 +692,64 @@ export function adminRouter(): Router {
       const message = (error instanceof Error ? error.message : String(error)).replace(/^\[vercel\]\s*/, '');
       return redirect(withFlash(target, `Birting á Vercel mistókst: ${message}`, 'villa'));
     }
+  }, guardWrite);
+
+  /**
+   * Lifts content off the company's existing website.
+   *
+   * Applied to empty fields only. An operator who has already written a
+   * tagline meant it, and an import is a guess by comparison — it proposes,
+   * it does not overwrite.
+   */
+  router.post('/vidskiptavinir/:id/vefur/flytja-inn', async (ctx) => {
+    const tenantId = ctx.params.id ?? '';
+    const tenant = getTenantOrThrow(tenantId);
+    const target = `/vidskiptavinir/${tenantId}/vefur`;
+
+    if (!tenant.websiteDomain) {
+      return redirect(withFlash(target, 'Ekkert lén er skráð á viðskiptavininn.', 'villa'));
+    }
+
+    const imported = await importSite(tenant.websiteDomain);
+    if (!imported) {
+      return redirect(withFlash(target, `Náði ekki í ${tenant.websiteDomain} eða síðan skilaði ekki HTML.`, 'villa'));
+    }
+
+    const patch: Record<string, unknown> = {};
+    const taken: string[] = [];
+
+    if (!tenant.tagline && imported.tagline) { patch.tagline = imported.tagline; taken.push('kjörorð'); }
+    if (!tenant.about && imported.about) { patch.about = imported.about; taken.push('lýsing'); }
+    if (!tenant.phone && imported.phone) { patch.phone = imported.phone; taken.push('sími'); }
+    if (!tenant.email && imported.email) { patch.email = imported.email; taken.push('netfang'); }
+    if (imported.brandColor) { patch.brandColor = imported.brandColor; taken.push('einkennislitur'); }
+
+    if (Object.keys(patch).length > 0) updateTenant(tenantId, patch);
+
+    // Prices are only added when there is no catalogue yet: merging a scraped
+    // price list into services the operator has already priced would be a
+    // silent overwrite of real numbers.
+    let addedServices = 0;
+    if (imported.services.length > 0 && listServices(tenantId).length === 0) {
+      for (const service of imported.services.slice(0, 20)) {
+        try {
+          createService(tenantId, { name: service.name, priceIsk: service.priceIsk, durationMin: 60 });
+          addedServices++;
+        } catch {
+          // A name the catalogue rejects is skipped rather than failing the import.
+        }
+      }
+      if (addedServices > 0) taken.push(`${addedServices} þjónustuliðir`);
+    }
+
+    const built = generateVariants(tenantId);
+
+    const summary = taken.length > 0
+      ? `Sótt af ${imported.url}: ${taken.join(', ')}. ${built.length} tillögur endurgerðar.`
+      : `Ekkert nýtt fannst á ${imported.url} — reitirnir eru þegar fylltir. ${built.length} tillögur endurgerðar.`;
+
+    return redirect(withFlash(target, imported.notes.length > 0 ? `${summary} ${imported.notes.join(' ')}` : summary,
+      taken.length > 0 ? 'gott' : 'upplysing'));
   }, guardWrite);
 
   router.post('/vidskiptavinir/:id/vefur/endurgera', (ctx) => {
@@ -1100,10 +1171,6 @@ export function adminRouter(): Router {
                   <label for="lysing">Um okkur</label>
                   <textarea id="lysing" name="lysing" rows="4">${tenant.about}</textarea>
                 </div>
-                <div class="field">
-                  <label for="litur">Einkennislitur</label>
-                  <input id="litur" name="litur" type="text" value="${tenant.brandColor}" placeholder="#1d4ed8">
-                </div>
               </div>
 
               <div class="panel">
@@ -1186,7 +1253,7 @@ export function adminRouter(): Router {
         address: form.heimilisfang,
         postcode: form.postnumer,
         about: form.lysing,
-        brandColor: form.litur,
+
         slotGranularityMin: Number(form.bil),
         minNoticeMin: Number(form.fyrirvari),
         maxAdvanceDays: Number(form.hamark),
@@ -1622,7 +1689,6 @@ function wizardForm(ctx: RequestContext, values: Record<string, string>, errors:
           ${field('len', 'Lén', { placeholder: 'stofan.is', help: 'Ef lénið er ekki til ennþá má sleppa því.' })}
           ${field('heimilisfang', 'Heimilisfang')}
           ${field('postnumer', 'Póstnúmer', { placeholder: '101' })}
-          ${field('litur', 'Einkennislitur', { placeholder: '#1d4ed8', help: 'Notaður á vefsíðunni og í tölvupósti.' })}
 
           <div class="field">
             <label for="lysing">Lýsing á fyrirtækinu</label>

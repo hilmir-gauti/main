@@ -28,6 +28,8 @@ import { weeklyHoursMap } from '../domain/schedule.ts';
 import { formatAddress, getTenantOrThrow } from '../domain/tenants.ts';
 import type { Service, Staff, Tenant } from '../domain/types.ts';
 import { buildPalette, variantByKey, variantsForIndustry, type Palette, type Variant } from './theme.ts';
+import { heroMotif, motionScript, motionStyles } from './motion.ts';
+import { resolveBrandColor } from './palette-defaults.ts';
 import { bookingWidgetScript, bookingWidgetStyles } from './widget.ts';
 
 /** E.164 is what we store and dial; "555 1234" is what Icelanders read. */
@@ -143,11 +145,110 @@ function servicesSection(content: SiteContent, variant: Variant): SafeHtml {
     </div>`;
 }
 
-function heroSection(content: SiteContent, variant: Variant): SafeHtml {
+/**
+ * A short row of facts under the hero.
+ *
+ * Only ever built from things already known — never padded out with invented
+ * claims like "20 years of experience", which is the standard filler on
+ * generated sites and is a lie the business then has to live with.
+ */
+function trustStrip(content: SiteContent): SafeHtml {
+  const { tenant } = content;
+  const preset = industryPreset(tenant.industry);
+  const openDays = Object.values(content.hours ?? {}).filter((ranges) => ranges.length > 0).length;
+
+  const stats: Array<{ value: string; label: string }> = [];
+
+  if (content.services.length > 0) {
+    stats.push({ value: String(content.services.length), label: 'þjónustuliðir í boði' });
+  }
+  if (content.staff.length > 0) {
+    stats.push({ value: String(content.staff.length), label: preset.defaultStaffTitle.toLowerCase() });
+  }
+  if (openDays > 0) {
+    stats.push({ value: `${openDays}`, label: openDays === 1 ? 'opinn dagur í viku' : 'opnir dagar í viku' });
+  }
+  stats.push({ value: 'Strax', label: 'staðfesting á bókun' });
+
+  if (stats.length < 3) return html``;
+
+  return html`
+    <section class="section" style="border-top:0;padding-top:clamp(1.5rem,4vw,2.5rem)">
+      <div class="wrap">
+        <div class="stat-strip reveal-stagger">
+          ${stats.map((stat) => html`
+            <div class="stat"><strong>${stat.value}</strong><span>${stat.label}</span></div>`)}
+        </div>
+      </div>
+    </section>`;
+}
+
+/**
+ * Questions every booking generates, answered from this tenant's own settings
+ * rather than from boilerplate — the cancellation window and the notice period
+ * are real numbers the booking engine enforces.
+ */
+function faqSection(content: SiteContent): SafeHtml {
+  const { tenant } = content;
+  const preset = industryPreset(tenant.industry);
+
+  const items: Array<{ q: string; a: SafeHtml }> = [
+    {
+      q: 'Hvernig bóka ég tíma?',
+      a: html`<p>Veldu þjónustu og lausan tíma hér að ofan. Þú færð staðfestingu í tölvupósti um leið og
+              bókunin er skráð${tenant.phone ? html`, eða hringdu í ${phoneDisplay(tenant.phone)}` : ''}.</p>`,
+    },
+    {
+      q: 'Hvað ef ég kemst ekki?',
+      a: html`<p>Afbókaðu með minnst ${tenant.cancelWindowHours} klukkustunda fyrirvara. Tengill til að
+              afbóka fylgir staðfestingarpóstinum, svo þú þarft ekki að hringja.</p>`,
+    },
+  ];
+
+  if (tenant.minNoticeMin > 0) {
+    items.push({
+      q: 'Get ég bókað með stuttum fyrirvara?',
+      a: html`<p>Lausir tímar birtast frá ${formatDurationIs(tenant.minNoticeMin)} fram í tímann.
+              Vantar þig fyrr${tenant.phone ? html`, hringdu í ${phoneDisplay(tenant.phone)}` : ''} — það er
+              oft hægt að finna lausn.</p>`,
+    });
+  }
+
+  if (content.staff.length > 1) {
+    items.push({
+      q: `Get ég valið hvaða ${preset.defaultStaffTitle.toLowerCase()} tekur á móti mér?`,
+      a: html`<p>Já. Veldu nafn í bókunarferlinu, eða slepptu því og þá fyllum við í fyrsta lausa tímann.</p>`,
+    });
+  }
+
+  return html`
+    <section class="section" id="spurningar">
+      <div class="wrap">
+        <div class="section-title reveal">
+          <h2>Algengar spurningar</h2>
+        </div>
+        <div class="faq reveal-stagger">
+          ${items.map((item) => html`
+            <details>
+              <summary>${item.q}</summary>
+              ${item.a}
+            </details>`)}
+        </div>
+      </div>
+    </section>`;
+}
+
+function heroSection(content: SiteContent, variant: Variant, palette: Palette): SafeHtml {
   const { tenant } = content;
   const tagline = content.tagline || tenant.tagline;
   const preset = industryPreset(tenant.industry);
   const address = formatAddress(tenant);
+
+  // Sits behind the copy in every variant. The blobs are animated, the motif
+  // is per-trade, and both are decorative — hidden from assistive tech.
+  const backdrop = html`
+    <div class="hero-aura" aria-hidden="true"><span></span><span></span><span></span></div>
+    ${raw(heroMotif(preset.template, palette))}`;
 
   const actions = html`
     <div class="hero-actions">
@@ -163,7 +264,8 @@ function heroSection(content: SiteContent, variant: Variant): SafeHtml {
     ].filter(Boolean) as string[];
 
     return html`
-      <header class="hero">
+      <header class="hero hero-${variant.layout.hero}">
+        ${backdrop}
         <div class="hero-grid">
           <div class="hero-copy">
             <p class="eyebrow">${preset.label}</p>
@@ -180,7 +282,8 @@ function heroSection(content: SiteContent, variant: Variant): SafeHtml {
 
   if (variant.layout.hero === 'mynd') {
     return html`
-      <header class="hero">
+      <header class="hero hero-${variant.layout.hero}">
+        ${backdrop}
         <div class="wrap">
           <div class="hero-inner">
             <p class="eyebrow">${preset.label}${address ? ` · ${address.split(',').pop()?.trim()}` : ''}</p>
@@ -193,7 +296,8 @@ function heroSection(content: SiteContent, variant: Variant): SafeHtml {
   }
 
   return html`
-    <header class="hero">
+    <header class="hero hero-${variant.layout.hero}">
+      ${backdrop}
       <div class="wrap">
         <p class="eyebrow">${preset.label}</p>
         <h1>${tenant.name}</h1>
@@ -284,8 +388,9 @@ export interface RenderOptions {
 export function renderSite(content: SiteContent, options: RenderOptions): string {
   const { tenant } = content;
   const variant = variantByKey(options.variantKey);
-  const light = buildPalette(tenant.brandColor, false);
-  const dark = buildPalette(tenant.brandColor, true);
+  const brandColor = resolveBrandColor(tenant.brandColor, tenant.industry);
+  const light = buildPalette(brandColor, false);
+  const dark = buildPalette(brandColor, true);
   const preset = industryPreset(tenant.industry);
 
   const siteUrl = tenant.websiteDomain ? `https://${tenant.websiteDomain}` : `${config.baseUrl}/v/${tenant.slug}`;
@@ -368,6 +473,7 @@ footer{border-top:1px solid var(--border);padding-block:2.5rem;color:var(--muted
 .footer-grid{display:flex;flex-wrap:wrap;gap:1rem 2.5rem;justify-content:space-between}
 ${options.previewNotice ? raw('.preview-banner{background:#0f172a;color:#fff;text-align:center;padding:.6rem 1rem;font-size:.88rem}') : ''}
 ${raw(variant.css(light))}
+${raw(motionStyles(light))}
 ${raw(bookingWidgetStyles())}
 @media (max-width:640px){ .hero-actions .btn{flex:1;text-align:center} }
 </style>
@@ -375,29 +481,44 @@ ${raw(bookingWidgetStyles())}
 <body>
 ${options.previewNotice ? html`<div class="preview-banner">${options.previewNotice}</div>` : ''}
 
-${heroSection(content, variant)}
+<nav class="sitenav">
+  <div class="wrap sitenav-inner">
+    <a class="brandmark" href="#top"><span class="dot"></span>${tenant.name}</a>
+    <ul class="navlinks">
+      ${content.services.length > 0 ? html`<li><a href="#thjonusta">Þjónusta</a></li>` : ''}
+      <li><a href="#um-okkur">Um okkur</a></li>
+      <li><a href="#hafa-samband">Hafa samband</a></li>
+    </ul>
+    <a class="btn btn-primary btn-sm nav-cta" href="#bokun">${preset.bookVerb}</a>
+  </div>
+</nav>
+
+<div id="top"></div>
+${heroSection(content, variant, light)}
 
 <main>
+  ${trustStrip(content)}
+
   ${content.services.length > 0
     ? html`
       <section class="section" id="thjonusta">
         <div class="wrap">
-          <div class="section-title">
+          <div class="section-title reveal">
             <h2>Þjónusta</h2>
             <p>Verð eru með virðisaukaskatti. Hafðu samband ef þú finnur ekki það sem þig vantar.</p>
           </div>
-          ${servicesSection(content, variant)}
+          <div class="reveal-stagger">${servicesSection(content, variant)}</div>
         </div>
       </section>`
     : ''}
 
   <section class="section" id="bokun">
     <div class="wrap">
-      <div class="section-title">
+      <div class="section-title reveal">
         <h2>${preset.bookVerb}</h2>
         <p>Veldu tíma sem hentar þér. Þú færð staðfestingu strax.</p>
       </div>
-      <div class="booking-shell">
+      <div class="booking-shell reveal">
         <div id="rth-bokun" data-api="${apiBase}" data-slug="${tenant.slug}"></div>
       </div>
     </div>
@@ -405,7 +526,7 @@ ${heroSection(content, variant)}
 
   <section class="section" id="um-okkur">
     <div class="wrap">
-      <div class="grid grid-two">
+      <div class="grid grid-two reveal-stagger">
         <div>
           <h2>Um okkur</h2>
           <p>${about}</p>
@@ -429,7 +550,7 @@ ${heroSection(content, variant)}
 
   <section class="section" id="hafa-samband">
     <div class="wrap">
-      <div class="grid grid-two">
+      <div class="grid grid-two reveal-stagger">
         <div>
           <h2>Hafa samband</h2>
           ${tenant.phone ? html`<p><strong>Sími:</strong> <a href="tel:${tenant.phone}">${phoneDisplay(tenant.phone)}</a></p>` : ''}
@@ -449,7 +570,13 @@ ${heroSection(content, variant)}
       </div>
     </div>
   </section>
+  ${faqSection(content)}
 </main>
+
+<div class="cta-bar">
+  <a class="btn btn-primary" href="#bokun">${preset.bookVerb}</a>
+  ${tenant.phone ? html`<a class="btn btn-ghost" href="tel:${tenant.phone}">Hringja</a>` : ''}
+</div>
 
 <footer>
   <div class="wrap footer-grid">
@@ -459,6 +586,7 @@ ${heroSection(content, variant)}
 </footer>
 
 ${structuredData(content, siteUrl)}
+<script>${raw(motionScript())}</script>
 <script>${raw(bookingWidgetScript())}</script>
 </body>
 </html>`;
