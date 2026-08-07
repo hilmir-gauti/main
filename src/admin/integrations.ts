@@ -105,6 +105,37 @@ export function integrationSpecs(): IntegrationSpec[] {
     },
 
     {
+      key: 'vercel',
+      title: 'Vefhýsing (Vercel)',
+      purpose: 'Setur vefsíður viðskiptavina í loftið á eigin léni með TLS og hraðneti, í stað þess að hýsa þær af þessari vél.',
+      withoutIt: 'Vefsíður eru smíðaðar og aðgengilegar héðan á /v/<slug>, en ekki á eigin léni.',
+      docsUrl: 'https://vercel.com/account/tokens',
+      docsLabel: 'Vercel-lyklar',
+      steps: [
+        html`Stofnaðu reikning á <a href="https://vercel.com/signup" target="_blank" rel="noopener">vercel.com</a>.
+          Hobby-áskriftin er ókeypis og dugar fyrir vefsíður viðskiptavina.`,
+        html`Farðu á <a href="https://vercel.com/account/tokens" target="_blank" rel="noopener">Account Settings → Tokens</a>
+          og búðu til nýjan lykil. Gefðu honum gildistíma sem þú manst eftir — rennur hann út hættir birting að virka.`,
+        html`Límdu lykilinn hér að neðan. Sé reikningurinn hluti af <em>team</em> þarf líka <strong>Team ID</strong>,
+          sem er undir <strong>Team Settings → General</strong>.`,
+        html`Opnaðu svo viðskiptavin, farðu í <strong>Vefsíða</strong>, veldu útlit og ýttu á
+          <em>Setja í loftið á Vercel</em>. Hver viðskiptavinur fær sitt eigið Vercel-verkefni.`,
+        html`Sé lén skráð á viðskiptavininn tengist það sjálfkrafa. Vercel svarar þá með þeim DNS-færslum sem
+          þarf að skrá hjá lénaskránni — þær birtast í skilaboðunum.`,
+      ],
+      fields: [
+        { key: 'VERCEL_TOKEN', label: 'Token', type: 'password', help: 'Úr Account Settings → Tokens.' },
+        { key: 'VERCEL_TEAM_ID', label: 'Team ID', placeholder: 'team_…', help: 'Aðeins ef verkefnin tilheyra teymi.' },
+        {
+          key: 'VERCEL_PROJECT_PREFIX',
+          label: 'Forskeyti verkefna',
+          placeholder: 'rth',
+          help: 'Verkefni heita <forskeyti>-<slug>, svo þau ruglist ekki við annað á reikningnum.',
+        },
+      ],
+    },
+
+    {
       key: 'twilio',
       title: 'Símsvörun og SMS (Twilio)',
       purpose: 'Símsvari sem svarar á íslensku og bókar tíma, ásamt SMS-staðfestingum og áminningum.',

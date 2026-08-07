@@ -76,6 +76,7 @@ import { htmlResponse, redirect, serializeCookie, withCookie } from '../http/res
 import { Router } from '../http/router.ts';
 import type { RequestContext } from '../http/context.ts';
 import { chosenVariant, generateVariants, latestBuild, listVariants, publishVariant } from '../website/generator.ts';
+import { deployPublishedSite, hostingStatus } from '../website/hosting.ts';
 import { servePreview } from '../publicapi/routes.ts';
 import { csrfField, emptyState, icon, money, page, statCard, statusTag, when } from './layout.ts';
 import { registerFirstRun } from './firstrun.ts';
@@ -549,6 +550,7 @@ export function adminRouter(): Router {
     const variants = listVariants(tenant.id);
     const chosen = chosenVariant(tenant.id);
     const build = latestBuild(tenant.id);
+    const hosting = hostingStatus(tenant.id);
 
     return htmlResponse(
       page(
@@ -575,6 +577,30 @@ export function adminRouter(): Router {
                   <span class="tag tag-ok">${build.template}</span>
                   <span class="muted small">${when(build.built_at)}</span>
                   <a class="btn btn-ghost btn-sm" href="/v/${tenant.slug}" target="_blank" rel="noopener">Opna vefsíðu</a>
+                </div>
+
+                <div class="split" style="margin-top:.9rem;padding-top:.9rem;border-top:1px solid var(--border)">
+                  ${hosting
+                    ? html`
+                      <span class="tag ${hosting.stale ? 'tag-bad' : 'tag-ok'}">
+                        ${hosting.stale ? 'Úrelt á Vercel' : 'Í loftinu á Vercel'}
+                      </span>
+                      <a class="btn btn-ghost btn-sm" href="${hosting.url}" target="_blank" rel="noopener">${hosting.url}</a>
+                      <span class="muted small">${hosting.deployedAt ? when(hosting.deployedAt) : ''}</span>`
+                    : html`<span class="muted small">
+                        ${config.vercel.enabled
+                          ? 'Ekki komin á ytri hýsingu — vefsíðan er aðeins aðgengileg héðan.'
+                          : 'Ytri hýsing er óstillt. Bættu við VERCEL_TOKEN undir Tengingar til að setja vefinn í loftið á eigin léni.'}
+                      </span>`}
+
+                  ${config.vercel.enabled
+                    ? html`<form method="post" action="/vidskiptavinir/${tenant.id}/vefur/hysing">
+                        ${csrfField(ctx.session)}
+                        <button class="btn ${hosting && !hosting.stale ? 'btn-ghost' : 'btn-primary'} btn-sm" type="submit">
+                          ${hosting ? 'Senda aftur á Vercel' : 'Setja í loftið á Vercel'}
+                        </button>
+                      </form>`
+                    : ''}
                 </div>
               </div>`
             : ''}
@@ -616,6 +642,33 @@ export function adminRouter(): Router {
     const result = publishVariant(tenantId, variant);
     setTaskStatus(tenantId, 'vefsida', 'lokid', `Birt: ${result.url}`);
     return redirect(withFlash(`/vidskiptavinir/${tenantId}/vefur`, `Vefsíðan er komin í loftið á ${result.url}`));
+  }, guardWrite);
+
+  /** Pushes the published build to Vercel. Separate from choosing a design. */
+  router.post('/vidskiptavinir/:id/vefur/hysing', async (ctx) => {
+    const tenantId = ctx.params.id ?? '';
+    const target = `/vidskiptavinir/${tenantId}/vefur`;
+
+    try {
+      const result = await deployPublishedSite(tenantId);
+
+      if (result.pendingDns.length > 0) {
+        // The site is live on the Vercel URL either way; the domain is what is
+        // waiting. Saying only "published" would hide the remaining step.
+        return redirect(withFlash(
+          target,
+          `Vefsíðan er í loftinu á ${result.url}. Lénið bíður DNS-færslna: ${result.pendingDns.join(' — ')}`,
+          'upplysing',
+        ));
+      }
+
+      return redirect(withFlash(target, `Vefsíðan er komin í loftið á ${result.domain || result.url}`));
+    } catch (error) {
+      // The flash already names the provider, so the `[vercel]` tag that
+      // IntegrationError prepends would only be noise here.
+      const message = (error instanceof Error ? error.message : String(error)).replace(/^\[vercel\]\s*/, '');
+      return redirect(withFlash(target, `Birting á Vercel mistókst: ${message}`, 'villa'));
+    }
   }, guardWrite);
 
   router.post('/vidskiptavinir/:id/vefur/endurgera', (ctx) => {

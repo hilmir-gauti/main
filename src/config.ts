@@ -178,6 +178,27 @@ export const config = {
     },
   },
 
+  vercel: {
+    /** Personal or team token from vercel.com/account/tokens. */
+    get token(): string {
+      return setting('VERCEL_TOKEN');
+    },
+    /** Only needed when the projects belong to a team rather than a personal account. */
+    get teamId(): string {
+      return setting('VERCEL_TEAM_ID');
+    },
+    /**
+     * Prefix for the generated project names, so a Vercel account shared with
+     * other work stays legible: `rth-harstofan-osp` rather than `harstofan-osp`.
+     */
+    get projectPrefix(): string {
+      return setting('VERCEL_PROJECT_PREFIX', 'rth');
+    },
+    get enabled(): boolean {
+      return Boolean(config.vercel.token);
+    },
+  },
+
   push: {
     /** Expo push endpoint — works for both iOS and Android from one token. */
     get expoEndpoint(): string {
@@ -302,6 +323,14 @@ export function integrationStatus(): Array<{ key: string; label: string; ready: 
       label: 'Símsvörun (Twilio)',
       ready: config.twilio.enabled,
       hint: config.twilio.enabled ? `Númer ${config.twilio.phoneNumber || 'óstillt'}` : 'Vantar TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN',
+    },
+    {
+      key: 'vercel',
+      label: 'Vefhýsing (Vercel)',
+      ready: config.vercel.enabled,
+      hint: config.vercel.enabled
+        ? 'Vefsíður fara í loftið á Vercel'
+        : 'Vantar VERCEL_TOKEN — vefsíður eru smíðaðar en hýstar hér heima',
     },
     {
       key: 'push',

@@ -105,6 +105,55 @@ npm run dev                 # ræsir á http://localhost:8080
 
 Opnaðu **http://localhost:8080/stjornbord**.
 
+### Í hýsingu allan sólarhringinn
+
+`.exe`-skráin keyrir aðeins meðan tölvan þín er í gangi. Eigi símsvarinn að
+svara og áminningar að fara út á nóttunni þarf kerfið að vera á netþjóni.
+
+Í boði eru `Dockerfile` og `fly.toml` fyrir [Fly.io](https://fly.io):
+
+```bash
+fly launch --no-deploy --copy-config
+fly volumes create rafraen_gogn --size 3 --region lhr
+fly secrets set APP_SECRET="$(openssl rand -hex 32)"
+fly deploy
+```
+
+Breyttu `BASE_URL` í `fly.toml` í raunverulega slóðina áður en þú keyrir
+`fly deploy` — Google-innskráning, Twilio-vefkrókar og bókunartenglar eru allir
+smíðaðir út frá henni, og kerfið neitar að ræsa á `http://` í rekstri.
+
+Opnaðu svo `https://<lén>/uppsetning` til að stofna stjórnandaaðganginn — það
+er sama fyrsta-skiptis-ferli og í `.exe`-skránni, svo enginn skjár í skel þarf.
+
+Tvennt í `fly.toml` má ekki hreyfa við: `auto_stop_machines = false`, því
+bakgrunnsverkið sem sendir áminningar er tímamælir inni í ferlinu og hættir að
+vinna sofni vélin; og **aðeins ein vél** (`fly scale count 1`), því
+gagnagrunnurinn er SQLite-skrá sem þolir einn skrifara.
+
+Sama mynd keyrir á Railway, Render eða hvaða VPS sem er — það eina sem skiptir
+máli er varanlegur diskur á `/data` og eitt ferli.
+
+> **Vercel gengur ekki fyrir stjórnborðið.** Skráakerfið þar er skrifvarið og
+> ferli lifa ekki milli beiðna, en gagnagrunnurinn er skrá á diski og
+> bakgrunnsverkið er tímamælir. Vefsíður viðskiptavina eiga hins vegar vel
+> heima þar — sjá næsta kafla.
+
+### Vefsíður viðskiptavina á Vercel
+
+Mynduð vefsíða er ein sjálfstæð HTML-skrá án byggingarþreps, sem er nákvæmlega
+það sem hraðnet á að hýsa. Settu `VERCEL_TOKEN` inn undir **Tengingar**, opnaðu
+svo viðskiptavin → **Vefsíða** → **Setja í loftið á Vercel**.
+
+Hver viðskiptavinur fær sitt eigið Vercel-verkefni (`rth-<slug>`). Sé lén skráð
+á viðskiptavininn tengist það sjálfkrafa, og þær DNS-færslur sem eftir standa
+birtast í skilaboðunum.
+
+Bókunarviðmótið á síðunni kallar áfram á þetta stjórnborð, sem sendir þegar
+`Access-Control-Allow-Origin` á opinbera bókunar-API-inu — það þarf því ekkert
+að stilla til viðbótar. Vefsíðan er áfram aðgengileg héðan á `/v/<slug>` hvort
+sem er, svo ytri hýsing er viðbót en aldrei forsenda.
+
 ### Þurrkeyrsla
 
 Kerfið keyrir að fullu án nokkurra ytri reikninga. Vantar SMTP? Póstar eru

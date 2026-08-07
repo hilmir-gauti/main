@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-exe
+.node-cache
+data
+mobile
+tests
+.git
+.github
+*.md
+*.sqlite
+*.sqlite-*

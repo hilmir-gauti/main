@@ -25,6 +25,7 @@ const SECRETS = new Set([
   'TWILIO_AUTH_TOKEN',
   'EXPO_ACCESS_TOKEN',
   'ANTHROPIC_API_KEY',
+  'VERCEL_TOKEN',
 ]);
 
 /** Everything the console is allowed to write. Anything else is ignored. */
@@ -42,6 +43,9 @@ export const SETTING_KEYS = [
   'TWILIO_ACCOUNT_SID',
   'TWILIO_AUTH_TOKEN',
   'TWILIO_PHONE_NUMBER',
+  'VERCEL_TOKEN',
+  'VERCEL_TEAM_ID',
+  'VERCEL_PROJECT_PREFIX',
   'EXPO_ACCESS_TOKEN',
   'PUSH_ENABLED',
   'ANTHROPIC_API_KEY',
