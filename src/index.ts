@@ -9,6 +9,7 @@ import { config, validateConfig } from './config.ts';
 import { openDatabase, closeDatabase, schemaVersion } from './core/db.ts';
 import { logger } from './core/logger.ts';
 import { operatorCount } from './domain/auth.ts';
+import { applySettings } from './domain/settings.ts';
 import { registerSubscribers } from './integrations/subscribers.ts';
 import { voiceRouter } from './integrations/voice/routes.ts';
 import { adminRouter } from './admin/routes.ts';
@@ -56,6 +57,10 @@ export async function main(): Promise<void> {
 
   openDatabase();
   logger.info('Gagnagrunnur opnaður', { path: config.databasePath, schema: schemaVersion() });
+
+  // Credentials entered in the console live in the database, so they can only
+  // be applied once it is open. They override the environment from here on.
+  applySettings();
 
   if (operatorCount() === 0 && process.env.RTH_EMBEDDED !== '1') {
     // The desktop build points the browser at /uppsetning instead, so this

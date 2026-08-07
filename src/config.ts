@@ -36,6 +36,47 @@ function envBool(key: string, fallback: boolean): boolean {
 const nodeEnv = (env('NODE_ENV', 'development') as NodeEnv) || 'development';
 const dataDir = resolve(env('DATA_DIR', './data'));
 
+/**
+ * Integration credentials entered in the control panel.
+ *
+ * The packaged desktop build has no `.env` and no shell, so credentials are
+ * stored (encrypted) in the database and pushed in here once it opens. They
+ * take precedence over environment variables: someone who typed a value into
+ * the UI expects that value to win over whatever the machine was started with.
+ *
+ * Kept as a plain mutable object rather than importing the settings module,
+ * because `core/db.ts` imports this file — the dependency has to point one way.
+ */
+let overrides: Record<string, string> = {};
+
+export function setConfigOverrides(next: Record<string, string>): void {
+  overrides = { ...next };
+}
+
+export function configOverrides(): Record<string, string> {
+  return { ...overrides };
+}
+
+/** Override first, then environment, then the default. */
+function setting(key: string, fallback = ''): string {
+  const override = overrides[key];
+  if (override !== undefined && override !== '') return override;
+  return env(key, fallback);
+}
+
+function settingInt(key: string, fallback: number): number {
+  const raw = setting(key);
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function settingBool(key: string, fallback: boolean): boolean {
+  const raw = setting(key).toLowerCase();
+  if (raw === '') return fallback;
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'já';
+}
+
 export const config = {
   env: nodeEnv,
   isProduction: nodeEnv === 'production',
@@ -74,36 +115,64 @@ export const config = {
   },
 
   google: {
-    clientId: env('GOOGLE_CLIENT_ID'),
-    clientSecret: env('GOOGLE_CLIENT_SECRET'),
+    get clientId(): string {
+      return setting('GOOGLE_CLIENT_ID');
+    },
+    get clientSecret(): string {
+      return setting('GOOGLE_CLIENT_SECRET');
+    },
     /** Must match the redirect URI registered in Google Cloud Console. */
-    redirectUri: env('GOOGLE_REDIRECT_URI', `${env('BASE_URL', 'http://localhost:8080').replace(/\/+$/, '')}/oauth/google/callback`),
+    get redirectUri(): string {
+      return setting('GOOGLE_REDIRECT_URI', `${config.baseUrl}/oauth/google/callback`);
+    },
     get enabled(): boolean {
       return Boolean(config.google.clientId && config.google.clientSecret);
     },
   },
 
   smtp: {
-    host: env('SMTP_HOST'),
-    port: envInt('SMTP_PORT', 587),
-    user: env('SMTP_USER'),
-    password: env('SMTP_PASSWORD'),
+    get host(): string {
+      return setting('SMTP_HOST');
+    },
+    get port(): number {
+      return settingInt('SMTP_PORT', 587);
+    },
+    get user(): string {
+      return setting('SMTP_USER');
+    },
+    get password(): string {
+      return setting('SMTP_PASSWORD');
+    },
     /** true = implicit TLS (port 465), false = STARTTLS upgrade (port 587). */
-    implicitTls: envBool('SMTP_IMPLICIT_TLS', envInt('SMTP_PORT', 587) === 465),
-    fromName: env('SMTP_FROM_NAME', 'Rafræn Þjónusta'),
-    fromEmail: env('SMTP_FROM_EMAIL', env('SMTP_USER')),
+    get implicitTls(): boolean {
+      return settingBool('SMTP_IMPLICIT_TLS', config.smtp.port === 465);
+    },
+    get fromName(): string {
+      return setting('SMTP_FROM_NAME', 'Rafræn Þjónusta');
+    },
+    get fromEmail(): string {
+      return setting('SMTP_FROM_EMAIL', config.smtp.user);
+    },
     get enabled(): boolean {
       return Boolean(config.smtp.host && config.smtp.fromEmail);
     },
   },
 
   twilio: {
-    accountSid: env('TWILIO_ACCOUNT_SID'),
-    authToken: env('TWILIO_AUTH_TOKEN'),
+    get accountSid(): string {
+      return setting('TWILIO_ACCOUNT_SID');
+    },
+    get authToken(): string {
+      return setting('TWILIO_AUTH_TOKEN');
+    },
     /** Number that answers calls, in E.164 (e.g. +3545550100). */
-    phoneNumber: env('TWILIO_PHONE_NUMBER'),
+    get phoneNumber(): string {
+      return setting('TWILIO_PHONE_NUMBER');
+    },
     /** Verify inbound webhook signatures. Disable only for local testing. */
-    validateSignature: envBool('TWILIO_VALIDATE_SIGNATURE', true),
+    get validateSignature(): boolean {
+      return settingBool('TWILIO_VALIDATE_SIGNATURE', true);
+    },
     get enabled(): boolean {
       return Boolean(config.twilio.accountSid && config.twilio.authToken);
     },
@@ -111,17 +180,29 @@ export const config = {
 
   push: {
     /** Expo push endpoint — works for both iOS and Android from one token. */
-    expoEndpoint: env('EXPO_PUSH_ENDPOINT', 'https://exp.host/--/api/v2/push/send'),
+    get expoEndpoint(): string {
+      return setting('EXPO_PUSH_ENDPOINT', 'https://exp.host/--/api/v2/push/send');
+    },
     /** Optional; required only if the Expo project enforces push security. */
-    expoAccessToken: env('EXPO_ACCESS_TOKEN'),
-    enabled: envBool('PUSH_ENABLED', true),
+    get expoAccessToken(): string {
+      return setting('EXPO_ACCESS_TOKEN');
+    },
+    get enabled(): boolean {
+      return settingBool('PUSH_ENABLED', true);
+    },
   },
 
   ai: {
     /** Powers the phone receptionist's speech understanding and website copy. */
-    apiKey: env('ANTHROPIC_API_KEY'),
-    baseUrl: env('ANTHROPIC_BASE_URL', 'https://api.anthropic.com'),
-    model: env('AI_MODEL', 'claude-sonnet-5'),
+    get apiKey(): string {
+      return setting('ANTHROPIC_API_KEY');
+    },
+    get baseUrl(): string {
+      return setting('ANTHROPIC_BASE_URL', 'https://api.anthropic.com');
+    },
+    get model(): string {
+      return setting('AI_MODEL', 'claude-sonnet-5');
+    },
     get enabled(): boolean {
       return Boolean(config.ai.apiKey);
     },

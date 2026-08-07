@@ -60,8 +60,9 @@ import {
   validateTenantInput,
 } from '../domain/tenants.ts';
 import { FEATURES, FEATURE_LABELS, type Feature } from '../domain/types.ts';
+import { SETTING_KEYS, saveSettings } from '../domain/settings.ts';
 import { buildEmailPlan, verifyEmailDns, type EmailProvider } from '../integrations/email/provisioning.ts';
-import { listMessages } from '../integrations/email/mailer.ts';
+import { listMessages, testSmtpConnection } from '../integrations/email/mailer.ts';
 import { buildAuthUrl, exchangeCode, isCalendarLinked, parseState, saveGoogleAccount, unlinkGoogleAccount } from '../integrations/google/oauth.ts';
 import { calendarStatus, syncBusyBlocks } from '../integrations/google/calendar.ts';
 import { createPairingInvite, listDevices, pendingInvite } from '../integrations/push/devices.ts';
@@ -75,6 +76,7 @@ import { chosenVariant, generateVariants, latestBuild, listVariants, publishVari
 import { servePreview } from '../publicapi/routes.ts';
 import { csrfField, emptyState, icon, money, page, statCard, statusTag, when } from './layout.ts';
 import { registerFirstRun } from './firstrun.ts';
+import { integrationsView } from './integrations.ts';
 
 const WEEKDAY_LABELS: Record<Weekday, string> = {
   1: 'Mánudagur', 2: 'Þriðjudagur', 3: 'Miðvikudagur', 4: 'Fimmtudagur',
@@ -103,6 +105,16 @@ function tenantTabs(tenantId: string, active: string): SafeHtml {
     { key: 'thjonusta', label: 'Þjónusta', href: `/vidskiptavinir/${tenantId}/thjonusta` },
     { key: 'simtol', label: 'Símtöl', href: `/vidskiptavinir/${tenantId}/simtol` },
     { key: 'stillingar', label: 'Stillingar', href: `/vidskiptavinir/${tenantId}/stillingar` },
+  ];
+  return html`<div class="tabs">
+    ${tabs.map((tab) => html`<a href="${tab.href}" class="${tab.key === active ? 'is-active' : ''}">${tab.label}</a>`)}
+  </div>`;
+}
+
+function settingsTabs(active: string): SafeHtml {
+  const tabs = [
+    { key: 'tengingar', label: 'Tengingar', href: '/stillingar' },
+    { key: 'kerfi', label: 'Kerfið', href: '/stillingar/kerfi' },
   ];
   return html`<div class="tabs">
     ${tabs.map((tab) => html`<a href="${tab.href}" class="${tab.key === active ? 'is-active' : ''}">${tab.label}</a>`)}
@@ -1204,35 +1216,84 @@ export function adminRouter(): Router {
   // Platform settings
   // =======================================================================
 
-  router.get('/stillingar', (ctx) => {
+  router.get('/stillingar', (ctx) =>
+    htmlResponse(
+      page(
+        { title: 'Tengingar', session: ctx.session, active: 'stillingar', flash: flashFrom(ctx), wide: true },
+        html`
+          ${settingsTabs('tengingar')}
+          ${integrationsView(ctx.session)}`,
+      ),
+    ), guard);
+
+  router.post('/stillingar/tengingar', (ctx) => {
+    const form = ctx.form();
+    const values: Record<string, string> = {};
+
+    for (const key of SETTING_KEYS) {
+      // Unchecked checkboxes are absent from the submission, which for a
+      // toggle means "false" rather than "leave unchanged".
+      if (key === 'SMTP_IMPLICIT_TLS' || key === 'PUSH_ENABLED') {
+        values[key] = form[key] === 'true' ? 'true' : 'false';
+      } else if (key in form) {
+        values[key] = form[key] ?? '';
+      }
+    }
+
+    const result = saveSettings(values);
+    return redirect(
+      withFlash(
+        '/stillingar',
+        result.saved.length > 0
+          ? `Tengingar vistaðar (${result.saved.length} gildi uppfærð).`
+          : 'Engar breytingar.',
+      ),
+    );
+  }, guardWrite);
+
+  /** Saves first, then sends a real message through the configured server. */
+  router.post('/stillingar/profa-post', async (ctx) => {
+    const form = ctx.form();
+    const values: Record<string, string> = {};
+    for (const key of SETTING_KEYS) {
+      if (key === 'SMTP_IMPLICIT_TLS' || key === 'PUSH_ENABLED') {
+        values[key] = form[key] === 'true' ? 'true' : 'false';
+      } else if (key in form) {
+        values[key] = form[key] ?? '';
+      }
+    }
+    saveSettings(values);
+
+    const recipient = ctx.session?.email ?? '';
+    if (!recipient) {
+      return redirect(withFlash('/stillingar', 'Ekkert netfang til að senda á.', 'villa'));
+    }
+
+    const result = await testSmtpConnection(null, recipient);
+
+    if (result.status === 'sent') {
+      return redirect(withFlash('/stillingar', `Prófunarpóstur sendur á ${recipient}. Athugaðu pósthólfið (og ruslpóst).`));
+    }
+    if (result.status === 'thurrkeyrsla') {
+      return redirect(withFlash('/stillingar', 'SMTP er ekki fullstillt — pósturinn fór í þurrkeyrslu. Fylltu út þjón og sendandanetfang.', 'upplysing'));
+    }
+    return redirect(withFlash('/stillingar', `Sending mistókst: ${result.error ?? 'óþekkt villa'}`, 'villa'));
+  }, guardWrite);
+
+  /** Environment and diagnostics, kept separate from the credential forms. */
+  router.get('/stillingar/kerfi', (ctx) => {
     const tenants = listTenants();
     const notifications = tenants.flatMap((tenant) => listNotifications(tenant.id, 10));
 
     return htmlResponse(
       page(
-        { title: 'Stillingar', session: ctx.session, active: 'stillingar', flash: flashFrom(ctx) },
+        { title: 'Kerfið', session: ctx.session, active: 'stillingar', flash: flashFrom(ctx) },
         html`
-          <div class="head"><div><h1>Stillingar kerfisins</h1><p class="sub">Tengingar og umhverfi.</p></div></div>
+          ${settingsTabs('kerfi')}
+
+          <div class="head"><div><h1>Kerfið</h1><p class="sub">Umhverfi og staða.</p></div></div>
 
           <div class="panel">
-            <h2>Tengingar</h2>
-            <div class="table-wrap"><table>
-              <thead><tr><th>Þjónusta</th><th>Staða</th><th>Athugasemd</th></tr></thead>
-              <tbody>${integrationStatus().map((item) => html`
-                <tr>
-                  <td><strong>${item.label}</strong></td>
-                  <td>${item.ready ? statusTag('lokid') : html`<span class="tag tag-warn">Óstillt</span>`}</td>
-                  <td class="small muted">${item.hint}</td>
-                </tr>`)}
-              </tbody></table></div>
-            <p class="small muted" style="margin-top:1rem">
-              Tengingar eru stilltar með umhverfisbreytum. Sjá <span class="mono">.env.example</span> í verkefninu.
-              Þegar tenging vantar fer viðkomandi þjónusta í <strong>þurrkeyrslu</strong>: allt er skráð eins og venjulega
-              en ekkert er sent út, svo hægt er að prófa kerfið til fulls án reikninga.
-            </p>
-          </div>
-
-          <div class="panel" style="margin-top:1rem">
             <h2>Umhverfi</h2>
             <div class="table-wrap"><table><tbody>
               <tr><td>Slóð</td><td class="mono">${config.baseUrl}</td></tr>
@@ -1242,6 +1303,9 @@ export function adminRouter(): Router {
               <tr><td>Tímabelti</td><td class="mono">${config.defaults.timezone}</td></tr>
               <tr><td>Áminning</td><td class="mono">${config.booking.reminderHoursBefore} klst. fyrir tíma</td></tr>
             </tbody></table></div>
+            <p class="small muted" style="margin-top:1rem">
+              Taktu afrit af möppunni sem gagnagrunnurinn er í — hún geymir allt kerfið.
+            </p>
           </div>
 
           <div class="panel" style="margin-top:1rem">

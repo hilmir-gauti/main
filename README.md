@@ -251,6 +251,13 @@ fengið hann.
 
 ## Tengingar
 
+Allar tengingar eru settar upp á **`/stillingar`** í stjórnborðinu. Þar er
+hverri þjónustu lýst, uppsetningarskrefin standa við hliðina á reitunum sem þau
+skila, og staðan sést strax.
+
+Ekkert þarf að setja í skrár. Gildin eru geymd í gagnagrunninum, leyndarmál
+dulkóðuð með AES-256-GCM, og breytingar taka gildi án endurræsingar.
+
 | Þjónusta | Til hvers | Vantar hana? |
 | --- | --- | --- |
 | Google Calendar | Bókanir í dagatal, einkatímar loka á bókanir | Bókanir virka, engin samstilling |
@@ -258,6 +265,21 @@ fengið hann.
 | Twilio | Símsvörun og SMS | Símsvörun óvirk, SMS í þurrkeyrslu |
 | Expo | Tilkynningar í app | Tilkynningar skráðar en ekki sendar |
 | Anthropic | Tillögur og textagerð | Tilbúnar tillögur notaðar |
+
+Umhverfisbreytur virka áfram fyrir hýsingu (sjá `.env.example`). Gildi sem er
+slegið inn í stjórnborðinu hefur forgang — sá sem fyllir út reit býst við að
+það gildi, ekki að breyta sem var sett fyrir mánuðum síðan yfirtaki það.
+
+### Í hvaða röð borgar sig að tengja
+
+1. **Ekkert** — kerfið er fullnothæft í þurrkeyrslu. Prófaðu allt bókunarferlið fyrst.
+2. **SMTP** — mest virði fyrir minnsta fyrirhöfn. Staðfestingar og áminningar
+   fara að berast. Gmail app-lykilorð tekur fimm mínútur.
+3. **Google Calendar** — næst mest virði. Krefst OAuth-uppsetningar í Google
+   Cloud Console, um fimmtán mínútur, gert einu sinni fyrir alla viðskiptavini.
+4. **Anthropic** — ein lína, ef þú vilt tillögur fyrir naglastofur og hárgreiðslu.
+5. **Twilio** — flóknast, því vefkrókar þurfa að ná í vélina utan frá. Skildu
+   það eftir þar til hitt er komið í gagnið.
 
 ### Tölvupóstur á eigin léni
 
