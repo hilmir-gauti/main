@@ -139,8 +139,18 @@ function checkNodeVersion() {
 // 1. Bundle
 // ---------------------------------------------------------------------------
 
+/** Short commit hash, or '' outside a git checkout. */
+function gitCommit() {
+  try {
+    return execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+  } catch {
+    return '';
+  }
+}
+
 async function bundle(esbuild) {
   const outfile = join(workDir, 'rafraen.cjs');
+  const commit = gitCommit();
 
   await esbuild.build({
     entryPoints: [join(root, 'src/desktop/main.ts')],
@@ -154,12 +164,17 @@ async function bundle(esbuild) {
     legalComments: 'none',
     // Node builtins stay external; everything of ours is inlined.
     external: ['node:*'],
-    define: { 'import.meta.url': '__filename' },
+    define: {
+      'import.meta.url': '__filename',
+      // Baked in so a packaged binary can say which build it is.
+      __RTH_BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+      __RTH_COMMIT__: JSON.stringify(commit),
+    },
     logLevel: 'warning',
   });
 
   const size = statSync(outfile).size;
-  log(`    Bundlað: ${humanSize(size)}`);
+  log(`    Bundlað: ${humanSize(size)}${commit ? ` (${commit})` : ''}`);
   return outfile;
 }
 

@@ -6,6 +6,7 @@
  */
 
 import { config, validateConfig } from './config.ts';
+import { buildInfo } from './version.ts';
 import { openDatabase, closeDatabase, schemaVersion } from './core/db.ts';
 import { logger } from './core/logger.ts';
 import { operatorCount } from './domain/auth.ts';
@@ -30,6 +31,8 @@ function buildRouter(): Router {
     json({
       stada: 'i_lagi',
       utgafa: schemaVersion(),
+      smidud: buildInfo.time || 'throun',
+      utgafuaudkenni: buildInfo.commit || 'throun',
       umhverfi: config.env,
       timi: new Date().toISOString(),
     }),

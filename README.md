@@ -75,6 +75,22 @@ Ekkert þarf að setja upp á vélinni.
 > Windows sýnir viðvörun í fyrsta skipti. Veldu „More info“ og svo
 > „Run anyway“. Til að losna við það þarf Authenticode-skírteini.
 
+### Að uppfæra
+
+Keyrsluskráin er frosin afrit af kóðanum — hún uppfærist ekki sjálf.
+
+```bash
+git pull
+npm install
+npm run exe
+```
+
+Keyrðu svo **nýju** skrána úr `dist-exe/`. Hafirðu afritað þá gömlu eitthvert
+annað þarf að skipta henni út þar líka.
+
+Til að sjá hvaða útgáfu þú ert að keyra: **Stillingar → Kerfið** sýnir
+smíðatíma og commit, og sama kemur fram í svarta glugganum við ræsingu.
+
 ### Sem þjónn (fyrir hýsingu)
 
 Krafa: **Node.js 22.5 eða nýrra** (kerfið notar innbyggða SQLite-einingu Node).

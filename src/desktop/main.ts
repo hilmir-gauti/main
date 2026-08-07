@@ -15,6 +15,7 @@ import { spawn } from 'node:child_process';
 import { platform } from 'node:os';
 import { join } from 'node:path';
 
+import { buildLabel } from '../version.ts';
 import { dataDirectory, loadSettings, settingsPath } from './paths.ts';
 
 // Node prints an ExperimentalWarning for the built-in SQLite module. That is
@@ -89,6 +90,7 @@ export async function start(): Promise<void> {
 
   line(BANNER);
   line('  Stjórnborð fyrir stafræna þjónustu við íslensk smáfyrirtæki');
+  line(`  ${buildLabel()}`);
   line('  ─────────────────────────────────────────────────────────────');
   line();
 

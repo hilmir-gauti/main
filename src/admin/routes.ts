@@ -26,6 +26,7 @@ import {
 } from '../core/time.ts';
 import { upcomingHolidays } from '../core/holidays.ts';
 import { config, integrationStatus, useSecureCookies } from '../config.ts';
+import { buildInfo, buildLabel } from '../version.ts';
 import { SESSION_COOKIE, login, logout, operatorCount } from '../domain/auth.ts';
 import {
   bookingStats,
@@ -1293,9 +1294,19 @@ export function adminRouter(): Router {
 
           <div class="head"><div><h1>Kerfið</h1><p class="sub">Umhverfi og staða.</p></div></div>
 
+          ${buildInfo.packaged
+            ? html`<div class="flash flash-upplysing" style="margin-bottom:1.2rem">
+                ${icon('M12 16v-5M12 8.5v.5M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18z', 18)}
+                <span>Þetta er keyrsluskrá. Hún uppfærist ekki sjálf — keyrðu
+                <span class="mono">git pull</span> og <span class="mono">npm run exe</span>
+                til að fá nýja útgáfu.</span>
+              </div>`
+            : ''}
+
           <div class="panel">
             <h2>Umhverfi</h2>
             <div class="table-wrap"><table><tbody>
+              <tr><td>Útgáfa</td><td class="mono">${buildLabel()}</td></tr>
               <tr><td>Slóð</td><td class="mono">${config.baseUrl}</td></tr>
               <tr><td>Umhverfi</td><td class="mono">${config.env}</td></tr>
               <tr><td>Gagnagrunnur</td><td class="mono">${config.databasePath}</td></tr>
