@@ -22,6 +22,7 @@ import {
 import { escapeHtml, html, raw } from '../src/core/html.ts';
 import { slugify } from '../src/core/ids.ts';
 import { buildMessage, encodeHeaderValue } from '../src/integrations/email/smtp.ts';
+import { checkSmtpSettings, diagnoseSmtpError } from '../src/integrations/email/diagnose.ts';
 import { buildEmailPlan } from '../src/integrations/email/provisioning.ts';
 import { classifyIntent } from '../src/integrations/voice/receptionist.ts';
 import { buildPalette, luminance, variantsForIndustry } from '../src/website/theme.ts';
@@ -369,6 +370,53 @@ describe('SMTP-skeytasmíði', () => {
     );
     // The body is base64-encoded, so a bare "." can never terminate DATA early.
     assert.match(message, /Content-Transfer-Encoding: base64/);
+  });
+});
+
+describe('SMTP-villugreining', () => {
+  // The exact wording Gmail returns on a wrong password. This is the failure
+  // an operator is overwhelmingly most likely to hit, so it is pinned.
+  const GMAIL_535 =
+    '[smtp] Auðkenning (PLAIN) mistókst: 535 5.7.8 Username and Password not accepted. ' +
+    'Learn more at | 5.7.8  https://support.google.com/mail/?p=BadCredentials';
+
+  it('þekkir að Gmail vill app-lykilorð', () => {
+    const diagnosis = diagnoseSmtpError(GMAIL_535, 'smtp.gmail.com');
+    assert.ok(diagnosis, 'greining á að finnast');
+    assert.match(diagnosis.advice.join(' '), /app-lykilorð/);
+    assert.equal(diagnosis.link?.url, 'https://myaccount.google.com/apppasswords');
+  });
+
+  it('gefur almennari ráð þegar þjónninn er ekki Gmail', () => {
+    const diagnosis = diagnoseSmtpError('[smtp] Auðkenning (LOGIN) mistókst: 535 Invalid login', 'mail.stofan.is');
+    assert.ok(diagnosis);
+    assert.doesNotMatch(diagnosis.title, /Gmail/);
+  });
+
+  it('greinir tengingar- og TLS-villur', () => {
+    assert.match(diagnoseSmtpError('connect ECONNREFUSED 127.0.0.1:1025')!.advice.join(' '), /Bridge/);
+    assert.match(diagnoseSmtpError('getaddrinfo ENOTFOUND smtp.gmial.com')!.title, /nafnauppflettingu/);
+    assert.match(diagnoseSmtpError('wrong version number')!.advice.join(' '), /465/);
+  });
+
+  it('skilar null þegar ekkert passar, frekar en að skálda ráð', () => {
+    assert.equal(diagnoseSmtpError(''), null);
+    assert.equal(diagnoseSmtpError('eitthvað alveg nýtt fór úrskeiðis'), null);
+  });
+
+  it('varar við ósamræmi milli ports og TLS-stillingar', () => {
+    const base = { host: 'smtp.gmail.com', user: 'a@gmail.com', fromEmail: 'a@gmail.com' };
+    assert.match(checkSmtpSettings({ ...base, port: 465, implicitTls: false }).join(' '), /465/);
+    assert.match(checkSmtpSettings({ ...base, port: 587, implicitTls: true }).join(' '), /STARTTLS/);
+    assert.deepEqual(checkSmtpSettings({ ...base, port: 587, implicitTls: false }), []);
+  });
+
+  it('varar við þegar sendandanetfang og notandanafn stangast á hjá Gmail', () => {
+    const warnings = checkSmtpSettings({
+      host: 'smtp.gmail.com', port: 587, implicitTls: false,
+      user: 'rekstur@gmail.com', fromEmail: 'bokanir@stofan.is',
+    });
+    assert.match(warnings.join(' '), /samnefni/);
   });
 });
 

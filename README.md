@@ -314,6 +314,28 @@ SPF er stillt á `~all` en ekki `-all`: lítil fyrirtæki senda alltaf póst úr
 óvæntum áttum (bókhaldskerfi, vefform) og hörð höfnun eyðir slíkum póstum
 þegjandi. DMARC er `quarantine`, sem gefur öryggið án þess að henda pósti.
 
+### Þegar prófunarpóstur mistekst
+
+Undir **Stillingar → Tengingar** er hnappurinn *Senda prófunarpóst*. Mistakist
+sendingin birtist niðurstaðan á sömu síðu: hvað þarf að laga, og undir
+*Svar þjónsins* nákvæmlega það sem póstþjónninn sagði.
+
+Langalgengasta orsökin er Gmail. Google hafnar venjulegu lykilorði reikningsins
+fyrir SMTP og svarar `535 5.7.8 Username and Password not accepted`. Lausnin er
+alltaf sú sama:
+
+1. Kveiktu á **tveggja þátta auðkenningu** á Google-reikningnum — app-lykilorð
+   eru ekki í boði án hennar.
+2. Farðu á [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
+   og búðu til nýtt app-lykilorð.
+3. Límdu 16 stafa lykilorðið í **Lykilorð**, með fullt netfang í
+   **Notandanafn** og sama netfang í **Sendandanetfang**.
+
+Hinar villurnar sem kerfið þekkir og gefur ráð við: lokað port eða eldveggur
+(`ETIMEDOUT`), rangt stafað þjónsheiti (`ENOTFOUND`), Proton Bridge ekki í gangi
+(`ECONNREFUSED`), TLS-stilling sem passar ekki við portið (465 vill *TLS strax*,
+587 vill STARTTLS), og sendandanetfang sem þjónninn leyfir ekki (`550`).
+
 ### Símsvörun
 
 Símsvarinn talar íslensku með Polly-röddinni **Dóru** (Twilio velur annars

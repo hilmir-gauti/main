@@ -64,6 +64,8 @@ import { FEATURES, FEATURE_LABELS, type Feature } from '../domain/types.ts';
 import { SETTING_KEYS, saveSettings } from '../domain/settings.ts';
 import { buildEmailPlan, verifyEmailDns, type EmailProvider } from '../integrations/email/provisioning.ts';
 import { listMessages, testSmtpConnection } from '../integrations/email/mailer.ts';
+import { checkSmtpSettings, diagnoseSmtpError } from '../integrations/email/diagnose.ts';
+import { recordSmtpTest, lastSmtpTest } from '../domain/settings.ts';
 import { buildAuthUrl, exchangeCode, isCalendarLinked, parseState, saveGoogleAccount, unlinkGoogleAccount } from '../integrations/google/oauth.ts';
 import { calendarStatus, syncBusyBlocks } from '../integrations/google/calendar.ts';
 import { createPairingInvite, listDevices, pendingInvite } from '../integrations/push/devices.ts';
@@ -1223,7 +1225,7 @@ export function adminRouter(): Router {
         { title: 'Tengingar', session: ctx.session, active: 'stillingar', flash: flashFrom(ctx), wide: true },
         html`
           ${settingsTabs('tengingar')}
-          ${integrationsView(ctx.session)}`,
+          ${integrationsView(ctx.session, lastSmtpTest())}`,
       ),
     ), guard);
 
@@ -1272,13 +1274,34 @@ export function adminRouter(): Router {
 
     const result = await testSmtpConnection(null, recipient);
 
+    // The full detail is stored rather than squeezed into a redirect, so the
+    // page can show the server's own words next to what to do about them.
+    recordSmtpTest({
+      at: Date.now(),
+      status: result.status,
+      recipient,
+      error: result.error ?? '',
+      host: config.smtp.host,
+      warnings: checkSmtpSettings({
+        host: config.smtp.host,
+        port: config.smtp.port,
+        user: config.smtp.user,
+        fromEmail: config.smtp.fromEmail,
+        implicitTls: config.smtp.implicitTls,
+      }),
+    });
+
     if (result.status === 'sent') {
       return redirect(withFlash('/stillingar', `Prófunarpóstur sendur á ${recipient}. Athugaðu pósthólfið (og ruslpóst).`));
     }
     if (result.status === 'thurrkeyrsla') {
-      return redirect(withFlash('/stillingar', 'SMTP er ekki fullstillt — pósturinn fór í þurrkeyrslu. Fylltu út þjón og sendandanetfang.', 'upplysing'));
+      return redirect(withFlash('/stillingar', 'SMTP er ekki fullstillt — fylltu út þjón og sendandanetfang.', 'upplysing'));
     }
-    return redirect(withFlash('/stillingar', `Sending mistókst: ${result.error ?? 'óþekkt villa'}`, 'villa'));
+
+    const diagnosis = diagnoseSmtpError(result.error ?? '', config.smtp.host);
+    return redirect(
+      withFlash('/stillingar', diagnosis ? diagnosis.title : 'Sending mistókst — sjá nánar hér að neðan.', 'villa'),
+    );
   }, guardWrite);
 
   /** Environment and diagnostics, kept separate from the credential forms. */

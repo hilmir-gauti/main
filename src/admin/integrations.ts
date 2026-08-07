@@ -10,7 +10,9 @@
 
 import { html, raw, type SafeHtml } from '../core/html.ts';
 import { config, integrationStatus } from '../config.ts';
-import { environmentKeys, isSecret, settingsForForm, SETTING_KEYS } from '../domain/settings.ts';
+import { environmentKeys, isSecret, settingsForForm, SETTING_KEYS, type SmtpTestResult } from '../domain/settings.ts';
+import { diagnoseSmtpError } from '../integrations/email/diagnose.ts';
+import { formatDateTimeIs } from '../core/time.ts';
 import { webhookUrls } from '../integrations/twilio.ts';
 import type { OperatorSession } from '../http/context.ts';
 import { csrfField, icon, statusTag } from './layout.ts';
@@ -164,10 +166,71 @@ export function integrationSpecs(): IntegrationSpec[] {
 }
 
 // ---------------------------------------------------------------------------
+// SMTP test result
+// ---------------------------------------------------------------------------
+
+/**
+ * Shows the outcome of the last test send. Failures carry both the advice and
+ * the server's verbatim reply — the advice is a well-informed guess, the reply
+ * is fact, and the operator may need either.
+ */
+function smtpTestPanel(test: SmtpTestResult | null): SafeHtml {
+  if (!test) return html``;
+
+  const when = formatDateTimeIs(test.at, config.defaults.timezone);
+
+  if (test.status === 'sent') {
+    return html`
+      <div class="test-result test-ok">
+        <strong>Prófunarpóstur sendur ${when}</strong>
+        <p>Fór á ${test.recipient}. Sjáirðu hann ekki, athugaðu ruslpóstmöppuna.</p>
+      </div>`;
+  }
+
+  if (test.status === 'thurrkeyrsla') {
+    return html`
+      <div class="test-result test-info">
+        <strong>Þurrkeyrsla ${when}</strong>
+        <p>Þjónn eða sendandanetfang vantar, svo pósturinn var skráður en ekki sendur.</p>
+      </div>`;
+  }
+
+  const diagnosis = diagnoseSmtpError(test.error, test.host);
+
+  return html`
+    <div class="test-result test-bad">
+      <strong>${diagnosis ? diagnosis.title : 'Sending mistókst'}</strong>
+      <p class="small muted" style="margin:.2rem 0 .6rem">Prófað ${when}</p>
+
+      ${test.warnings.length > 0
+        ? html`
+          <p class="test-label">Stillingarnar sjálfar</p>
+          <ul class="test-list">${test.warnings.map((warning) => html`<li>${warning}</li>`)}</ul>`
+        : ''}
+
+      ${diagnosis
+        ? html`
+          <p class="test-label">Svona lagarðu þetta</p>
+          <ol class="test-list">${diagnosis.advice.map((item) => html`<li>${item}</li>`)}</ol>
+          ${diagnosis.link
+            ? html`<a class="btn btn-ghost btn-sm" href="${diagnosis.link.url}" target="_blank" rel="noopener">${diagnosis.link.label} ↗</a>`
+            : ''}`
+        : html`<p class="small">Þetta svar þekkjum við ekki. Svar þjónsins er hér að neðan — það er það sem þjónustuaðilinn spyr um.</p>`}
+
+      ${test.error
+        ? html`<details style="margin-top:.7rem">
+            <summary class="small">Svar þjónsins</summary>
+            <div class="copy mono" style="margin-top:.4rem">${test.error}</div>
+          </details>`
+        : ''}
+    </div>`;
+}
+
+// ---------------------------------------------------------------------------
 // View
 // ---------------------------------------------------------------------------
 
-export function integrationsView(session: OperatorSession | null): SafeHtml {
+export function integrationsView(session: OperatorSession | null, smtpTest: SmtpTestResult | null = null): SafeHtml {
   const values = settingsForForm();
   const status = new Map(integrationStatus().map((entry) => [entry.key, entry]));
   const fromEnv = new Set(environmentKeys());
@@ -277,7 +340,8 @@ export function integrationsView(session: OperatorSession | null): SafeHtml {
                         Senda prófunarpóst
                       </button>
                       <span class="small muted">Vistar fyrst, sendir svo á netfangið þitt.</span>
-                    </div>`
+                    </div>
+                    ${smtpTestPanel(smtpTest)}`
                   : ''}
               </div>
             </div>
@@ -309,6 +373,14 @@ export function integrationsView(session: OperatorSession | null): SafeHtml {
     </div>
 
     <style>
+      .test-result{margin-top:1rem;padding:1rem 1.1rem;border-radius:var(--r);border:1px solid transparent;font-size:.92rem}
+      .test-result p{margin:.3rem 0 0}
+      .test-ok{background:var(--ok-soft);color:var(--ok);border-color:color-mix(in srgb,var(--ok) 25%,transparent)}
+      .test-info{background:var(--brand-soft);color:var(--brand);border-color:color-mix(in srgb,var(--brand) 25%,transparent)}
+      .test-bad{background:var(--bad-soft);color:var(--bad);border-color:color-mix(in srgb,var(--bad) 25%,transparent)}
+      .test-label{margin:.9rem 0 0!important;font-size:.76rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;opacity:.75}
+      .test-list{margin:.35rem 0 0;padding-left:1.2rem;display:grid;gap:.4rem;line-height:1.55}
+      .test-result .copy{color:var(--ink)}
       .setup-steps{margin:0;padding-left:1.3rem;display:grid;gap:.7rem;color:var(--ink-2);font-size:.92rem;line-height:1.6}
       .setup-steps li{padding-left:.2rem}
       .setup-steps li::marker{color:var(--brand);font-weight:700}

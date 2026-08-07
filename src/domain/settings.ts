@@ -162,3 +162,42 @@ export function environmentKeys(): string[] {
   const stored = storedSettings();
   return SETTING_KEYS.filter((key) => !stored[key] && Boolean(process.env[key]));
 }
+
+// ---------------------------------------------------------------------------
+// Last SMTP test
+// ---------------------------------------------------------------------------
+
+export interface SmtpTestResult {
+  at: number;
+  status: string;
+  recipient: string;
+  error: string;
+  host: string;
+  warnings: string[];
+}
+
+const TEST_KEY = 'sidasta_postprofun';
+
+/**
+ * Stored rather than passed through the redirect: the raw SMTP error is long,
+ * and a URL is the wrong place for a paragraph of diagnostics.
+ */
+export function recordSmtpTest(result: SmtpTestResult): void {
+  run(
+    `INSERT INTO app_setting (key, value, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    TEST_KEY,
+    JSON.stringify(result),
+    Date.now(),
+  );
+}
+
+export function lastSmtpTest(): SmtpTestResult | null {
+  const row = all<{ value: string }>('SELECT value FROM app_setting WHERE key = ?', TEST_KEY)[0];
+  if (!row) return null;
+  try {
+    return JSON.parse(row.value) as SmtpTestResult;
+  } catch {
+    return null;
+  }
+}
