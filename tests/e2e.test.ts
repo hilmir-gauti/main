@@ -370,7 +370,7 @@ describe('opinbert bókunarviðmót', () => {
  * post a basket, and check that the shelf tells the truth afterwards.
  */
 describe('vefverslun', () => {
-  const slug = 'nordanvid-smidi';
+  const slug = 'nordfjord-design';
   let tenantId = '';
   let productId = '';
 
@@ -381,7 +381,7 @@ describe('vefverslun', () => {
     const response = await request('/vidskiptavinir/nyr', {
       form: {
         _csrf: token,
-        nafn: 'Norðanvið Smíði',
+        nafn: 'Norðfjörð Design',
         fag: 'tresmidi',
         netfang: 'smidi@example.is',
         simi: '4771234',

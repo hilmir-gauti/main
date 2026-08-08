@@ -69,13 +69,13 @@ const SEEDS: SeedSpec[] = [
   {
     // A workshop that sells objects rather than hours: the webstore, the dark
     // storefront design, and a shelf that is half stock and half commissions.
-    name: 'Norðanvið Smíði',
+    name: 'Norðfjörð Design',
     industry: 'tresmidi',
-    email: 'nordanvid@example.is',
+    email: 'nordfjorddesign@example.is',
     phone: '4771234',
     address: 'Hafnarbraut 8',
     postcode: '740',
-    domain: 'nordanvid.is',
+    domain: 'nordfjorddesign.is',
     brandColor: '#b4682e',
     variant: 'skogur',
   },

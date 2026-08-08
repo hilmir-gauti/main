@@ -320,7 +320,7 @@ describe('uppsetning trésmíðaverkstæðis', () => {
   beforeEach(freshDatabase);
 
   it('setur upp vörulista úr faginu þegar vefverslun er valin', () => {
-    const tenant = createTenant({ name: 'Norðanvið Smíði', industry: 'tresmidi' });
+    const tenant = createTenant({ name: 'Norðfjörð Design', industry: 'tresmidi' });
     const result = provisionTenant({ tenantId: tenant.id, features: ['vefsida', 'bokanir', 'vefverslun'] });
 
     const preset = industryPreset('tresmidi');
@@ -330,7 +330,7 @@ describe('uppsetning trésmíðaverkstæðis', () => {
   });
 
   it('sleppir vörulistanum þegar vefverslun er ekki valin', () => {
-    const tenant = createTenant({ name: 'Norðanvið Smíði', industry: 'tresmidi' });
+    const tenant = createTenant({ name: 'Norðfjörð Design', industry: 'tresmidi' });
     const result = provisionTenant({ tenantId: tenant.id, features: ['vefsida', 'bokanir'] });
 
     assert.equal(result.productsCreated, 0);
