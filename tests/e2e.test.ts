@@ -33,6 +33,7 @@ const { createHttpServer } = await import('../src/http/server.ts');
 const { buildRouter } = await import('../src/index.ts');
 const { getTenantBySlug } = await import('../src/domain/tenants.ts');
 const { listServices } = await import('../src/domain/catalog.ts');
+const { listProducts } = await import('../src/domain/shop/products.ts');
 const { flowForIndustry } = await import('../src/domain/intake/flows.ts');
 
 const EMAIL = 'stjori@rafraenthjonusta.is';
@@ -187,11 +188,11 @@ describe('uppsetningarferli nýs viðskiptavinar', () => {
     assert.ok(listServices(tenant!.id).length > 0, 'forstilltar þjónustur eiga að vera til');
   });
 
-  it('sýnir þrjár útlitstillögur', async () => {
+  it('sýnir allar útlitstillögur', async () => {
     const response = await request(`/vidskiptavinir/${tenantId}/vefur`);
     assert.equal(response.status, 200);
 
-    for (const variant of ['klassiskt', 'nutima', 'hlyleg']) {
+    for (const variant of ['klassiskt', 'nutima', 'hlyleg', 'skogur']) {
       assert.ok(response.body.includes(`/forskodun/${tenantId}/${variant}`), `${variant} vantar í forskoðun`);
     }
   });
@@ -361,6 +362,123 @@ describe('opinbert bókunarviðmót', () => {
     const cancelled = await request(`/afbokun/${token}`, { form: { astaeda: 'Kemst ekki' } });
     assert.equal(cancelled.status, 200);
     assert.match(cancelled.body, /afbókaður/i);
+  });
+});
+
+/**
+ * The webstore, walked the way a buyer walks it: read the shelf from the API,
+ * post a basket, and check that the shelf tells the truth afterwards.
+ */
+describe('vefverslun', () => {
+  const slug = 'nordanvid-smidi';
+  let tenantId = '';
+  let productId = '';
+
+  it('setur upp trésmíðaverkstæði með vörulista', async () => {
+    const page = await request('/vidskiptavinir/nyr');
+    const token = extractCsrf(page.body);
+
+    const response = await request('/vidskiptavinir/nyr', {
+      form: {
+        _csrf: token,
+        nafn: 'Norðanvið Smíði',
+        fag: 'tresmidi',
+        netfang: 'smidi@example.is',
+        simi: '4771234',
+        heimilisfang: 'Hafnarbraut 8',
+        postnumer: '740',
+        litur: '#b4682e',
+        eiginleikar: ['vefsida', 'bokanir', 'vefverslun'],
+      },
+    });
+
+    assert.equal(response.status, 303);
+    tenantId = (response.headers.get('location') ?? '').split('/')[2] ?? '';
+    assert.ok(tenantId);
+
+    const tenant = getTenantBySlug(slug);
+    assert.ok(tenant, 'verkstæðið á að vera til');
+    assert.ok(listProducts(tenant!.id).length > 0, 'vörulisti fagsins á að fylgja með');
+  });
+
+  it('birtir verslunina á vefsíðunni', async () => {
+    const page = await request(`/vidskiptavinir/${tenantId}/vefur`);
+    const token = extractCsrf(page.body);
+    await request(`/vidskiptavinir/${tenantId}/vefur`, { form: { _csrf: token, utgafa: 'skogur' } });
+
+    const site = await request(`/v/${slug}`);
+    assert.equal(site.status, 200);
+    assert.match(site.body, /id="verslun"/, 'verslunarhlutinn á að vera á síðunni');
+    assert.match(site.body, /Skurðarbretti með epoxý/);
+    assert.match(site.body, /id="rth-karfa"/, 'karfan á að fylgja');
+  });
+
+  it('skilar vörulistanum í gegnum API', async () => {
+    const response = await request(`/api/vefur/verslun?slug=${slug}`);
+    assert.equal(response.status, 200);
+
+    const config = JSON.parse(response.body);
+    assert.ok(config.vorur.length > 0);
+    assert.ok(config.stillingar.maSaekja || config.stillingar.maSenda);
+
+    // Something stocked, so the order below can be seen to move the number.
+    const stocked = config.vorur.find((item: { eftirPontun: boolean }) => !item.eftirPontun);
+    assert.ok(stocked, 'að minnsta kosti ein vara á að vera til á lager');
+    productId = stocked.id;
+  });
+
+  it('tekur við pöntun og lækkar birgðir', async () => {
+    const before = JSON.parse((await request(`/api/vefur/verslun?slug=${slug}`)).body);
+    const stockBefore = before.vorur.find((item: { id: string }) => item.id === productId).hamark;
+
+    const response = await request('/api/vefur/pontun', {
+      json: {
+        slug,
+        afhending: 'saekja',
+        linur: [{ vara: productId, fjoldi: 1 }],
+        nafn: 'Anna Prófun',
+        simi: '6601234',
+        netfang: 'anna@example.is',
+        athugasemd: 'Má ég fá áletrun?',
+      },
+    });
+
+    assert.equal(response.status, 201, response.body);
+    const order = JSON.parse(response.body);
+    assert.match(order.pontun, /^P-/);
+    assert.ok(order.samtals > 0);
+    assert.match(order.stodusloð, /\/pontun\//);
+
+    const after = JSON.parse((await request(`/api/vefur/verslun?slug=${slug}`)).body);
+    const line = after.vorur.find((item: { id: string }) => item.id === productId);
+    assert.equal(line ? line.hamark : 0, stockBefore - 1, 'eintakið á að vera farið úr hillunni');
+
+    // The status page the confirmation email links to.
+    const status = await request(`/pontun/${order.stodusloð.split('/').pop()}`);
+    assert.equal(status.status, 200);
+    assert.match(status.body, new RegExp(order.pontun));
+  });
+
+  it('hafnar pöntun á vöru úr annarri verslun', async () => {
+    const response = await request('/api/vefur/pontun', {
+      json: {
+        slug: 'bilaverkstaedi-profunar',
+        afhending: 'saekja',
+        linur: [{ vara: productId, fjoldi: 1 }],
+        nafn: 'Anna Prófun',
+        simi: '6601234',
+      },
+    });
+
+    // The garage has no webstore, so the request never reaches pricing.
+    assert.equal(response.status, 400, response.body);
+  });
+
+  it('sýnir pöntunina í stjórnborðinu', async () => {
+    const response = await request(`/vidskiptavinir/${tenantId}/pantanir`);
+    assert.equal(response.status, 200);
+    assert.match(response.body, /Anna Prófun/);
+    assert.match(response.body, /Ný pöntun/);
   });
 });
 

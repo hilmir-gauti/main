@@ -87,6 +87,32 @@ export function heroMotif(template: string, palette: Palette): string {
         </g>
       </svg>`;
 
+    // Growth rings, drawn the way a cross-cut log actually reads: the rings are
+    // not concentric circles, they drift off-centre and vary in spacing. The
+    // grain lines running off to the left are the same log seen along its
+    // length. Each ring is a dashed path that draws itself on load.
+    case 'smidja': {
+      const rings = Array.from({ length: 11 }, (_, i) => {
+        const radius = 22 + i * 20 + Math.sin(i * 1.7) * 5;
+        const cx = 400 + i * 2.4;
+        const cy = 200 - i * 1.6;
+        const squash = (0.88 + Math.cos(i * 0.9) * 0.06).toFixed(3);
+        return `<ellipse class="ring" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${radius.toFixed(1)}"
+                  ry="${(radius * Number(squash)).toFixed(1)}" transform="rotate(${(-8 + i).toFixed(1)} ${cx.toFixed(1)} ${cy.toFixed(1)})"
+                  stroke-width="${i % 3 === 0 ? 2 : 1}" opacity="${(0.62 - i * 0.035).toFixed(2)}"/>`;
+      }).join('');
+
+      const grain = [70, 118, 166, 214, 262, 310, 358].map((y, i) =>
+        `<path d="M-20 ${y} C 90 ${y - 14 + i * 3}, 180 ${y + 16 - i * 2}, 300 ${y + (i % 2 ? 8 : -8)}"
+           stroke-width="1" opacity="${(0.3 - i * 0.02).toFixed(2)}"/>`).join('');
+
+      return `<svg class="motif motif-rings" viewBox="0 0 600 400" fill="none" aria-hidden="true" focusable="false">
+        <g stroke="${brand}" fill="none">${rings}</g>
+        <g stroke="${brand}" fill="none" stroke-linecap="round">${grain}</g>
+        <circle class="ring-core" cx="400" cy="200" r="5" fill="${brand}" opacity=".8"/>
+      </svg>`;
+    }
+
     default:
       return `<svg class="motif" viewBox="0 0 600 400" fill="none" aria-hidden="true" focusable="false">
         <g stroke="${brand}" opacity=".35">
@@ -218,6 +244,18 @@ html{scroll-behavior:auto}
 
   .motif{animation:motif-in 1.5s .25s cubic-bezier(.22,1,.36,1) both}
   @keyframes motif-in{from{opacity:0;transform:translateX(28px)}to{opacity:.6;transform:none}}
+
+  /* The growth rings are cut rather than faded in: each ellipse is a dashed
+     path whose gap is walked back to zero, so the log appears to be sawn open
+     ring by ring from the heart outwards. */
+  .motif-rings .ring{stroke-dasharray:1400;stroke-dashoffset:1400;
+    animation:ring-cut 2.6s cubic-bezier(.22,1,.36,1) forwards}
+  ${Array.from({ length: 11 }, (_, i) =>
+    `.motif-rings .ring:nth-of-type(${i + 1}){animation-delay:${(0.25 + i * 0.11).toFixed(2)}s}`).join('')}
+  @keyframes ring-cut{to{stroke-dashoffset:0}}
+  .motif-rings .ring-core{animation:core-pulse 4.5s ease-in-out 2s infinite}
+  @keyframes core-pulse{0%,100%{opacity:.55;transform:scale(1)}50%{opacity:.95;transform:scale(1.35)}}
+  .motif-rings .ring-core{transform-box:fill-box;transform-origin:center}
 
   /* Hero copy arrives in sequence rather than all at once. */
   .hero-copy>*,.hero-inner>*,.hero .wrap>*{animation:rise .8s cubic-bezier(.22,1,.36,1) both}

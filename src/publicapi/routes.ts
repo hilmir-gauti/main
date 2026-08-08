@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { config } from '../config.ts';
 import { badRequest, notFound } from '../core/errors.ts';
 import { escapeHtml } from '../core/html.ts';
+import { formatISK } from '../core/iceland.ts';
 import { logger } from '../core/logger.ts';
 import {
   addDays,
@@ -27,16 +28,17 @@ import {
 import { findAvailability } from '../domain/booking/availability.ts';
 import { cancelBooking, createBooking, getBookingByCancelToken } from '../domain/booking/bookings.ts';
 import { getServiceOrThrow } from '../domain/catalog.ts';
+import { createOrder, getOrderByToken } from '../domain/shop/orders.ts';
 import { flowForIndustry } from '../domain/intake/flows.ts';
 import { prepareIntake } from '../domain/intake/service.ts';
 import { validateIntake, type IntakeAnswers } from '../domain/intake/schema.ts';
 import { getTenantBySlug, getTenantOrThrow, isFeatureEnabled } from '../domain/tenants.ts';
-import type { Tenant } from '../domain/types.ts';
+import { ORDER_STATUS_FLOW, ORDER_STATUS_LABELS, type OrderDelivery, type ShopOrderView, type Tenant } from '../domain/types.ts';
 import { suggestOptions } from '../integrations/ai/suggestions.ts';
 import { publicCors, rateLimit } from '../http/middleware.ts';
 import { htmlResponse, json, redirect, type HttpResponse } from '../http/response.ts';
 import { Router } from '../http/router.ts';
-import { widgetConfig } from '../website/generator.ts';
+import { shopConfig, widgetConfig } from '../website/generator.ts';
 
 /** Resolves the tenant a public request refers to, rejecting inactive ones. */
 function resolveTenant(slug: unknown): Tenant {
@@ -50,6 +52,12 @@ function resolveTenant(slug: unknown): Tenant {
 function requireBookingEnabled(tenant: Tenant): void {
   if (!isFeatureEnabled(tenant.id, 'bokanir')) {
     throw badRequest('Netbókanir eru ekki virkar hjá þessu fyrirtæki.');
+  }
+}
+
+function requireShopEnabled(tenant: Tenant): void {
+  if (!isFeatureEnabled(tenant.id, 'vefverslun')) {
+    throw badRequest('Vefverslun er ekki virk hjá þessu fyrirtæki.');
   }
 }
 
@@ -160,6 +168,76 @@ export function publicRouter(): Router {
       afbokunarslod: `${config.baseUrl}/afbokun/${booking.cancelToken}`,
     }, 201);
   }, [writeLimit]);
+
+  // ---------------------------------------------------------------------
+  // Webstore
+  // ---------------------------------------------------------------------
+
+  router.get('/api/vefur/verslun', (ctx) => {
+    const tenant = resolveTenant(ctx.query.get('slug'));
+    requireShopEnabled(tenant);
+    // Short cache only: this is what tells a basket that the last one sold.
+    return json(shopConfig(tenant.id), 200, { 'cache-control': 'public, max-age=30' });
+  }, [apiLimit]);
+
+  /**
+   * Takes an order.
+   *
+   * The basket arrives as product ids and quantities and nothing else that
+   * costs money — every price, the postage and the VAT are recomputed here
+   * from the catalogue.
+   */
+  router.post('/api/vefur/pontun', (ctx) => {
+    const body = ctx.body();
+    const tenant = resolveTenant(body.slug);
+    requireShopEnabled(tenant);
+
+    const rawLines = Array.isArray(body.linur) ? body.linur : [];
+    if (rawLines.length === 0) throw badRequest('Karfan er tóm.');
+
+    const lines = rawLines.map((entry) => {
+      const line = (entry ?? {}) as Record<string, unknown>;
+      return {
+        productId: String(line.vara ?? ''),
+        quantity: Number(line.fjoldi ?? 1),
+        variant: typeof line.utfaersla === 'string' ? line.utfaersla : '',
+      };
+    });
+
+    const order = createOrder({
+      tenantId: tenant.id,
+      lines,
+      delivery: (body.afhending === 'sending' ? 'sending' : 'saekja') as OrderDelivery,
+      source: 'vefur',
+      notes: typeof body.athugasemd === 'string' ? body.athugasemd : '',
+      address: typeof body.heimilisfang === 'string' ? body.heimilisfang : '',
+      postcode: typeof body.postnumer === 'string' ? body.postnumer : '',
+      city: typeof body.stadur === 'string' ? body.stadur : '',
+      customer: {
+        name: String(body.nafn ?? ''),
+        phone: typeof body.simi === 'string' ? body.simi : '',
+        email: typeof body.netfang === 'string' ? body.netfang : '',
+      },
+    });
+
+    logger.info('Pöntun í gegnum vefsíðu', { tenantId: tenant.id, orderId: order.id });
+
+    return json({
+      pontun: order.reference,
+      samtals: order.totalIsk,
+      skilabod: order.customerEmail
+        ? 'Staðfesting hefur verið send á netfangið þitt. Við höfum samband með greiðsluupplýsingar.'
+        : 'Við höfum samband til að staðfesta pöntunina og senda greiðsluupplýsingar.',
+      stodusloð: `${config.baseUrl}/pontun/${order.statusToken}`,
+    }, 201);
+  }, [writeLimit]);
+
+  /** The customer's own view of an order, linked from the confirmation email. */
+  router.get('/pontun/:token', (ctx) => {
+    const order = getOrderByToken(ctx.params.token ?? '');
+    if (!order) return htmlResponse(orderPage(null), 404);
+    return htmlResponse(orderPage(order));
+  }, [rateLimit({ windowMs: 60_000, max: 30 })]);
 
   /** AI-assisted style suggestions for the "describe it" branches. */
   router.post('/api/vefur/tillogur', async (ctx) => {
@@ -371,6 +449,97 @@ button:hover{background:#b91c1c}
   main{background:#131c2e}
   .card{background:#0f172a;border-color:#1e293b}
   input{background:#0f172a;border-color:#334155;color:inherit}
+}
+</style></head>
+<body><main><h1>${escapeHtml(heading)}</h1>${bodyHtml}</main></body></html>`;
+}
+
+// ---------------------------------------------------------------------------
+// Order status page
+// ---------------------------------------------------------------------------
+
+/**
+ * Where the confirmation email's link lands.
+ *
+ * A workshop order takes weeks, so "where is it" is the question this page
+ * exists to answer without anyone having to pick up the phone. Same standalone
+ * styling as the cancellation page — these two pages are the only ones served
+ * outside a generated site.
+ */
+function orderPage(order: ShopOrderView | null): string {
+  if (!order) {
+    return standalonePage('Pöntun fannst ekki', '<p>Tengillinn er ógildur eða pöntunin hefur verið fjarlægð.</p>');
+  }
+
+  const cancelled = order.status === 'haett';
+  const currentIndex = ORDER_STATUS_FLOW.indexOf(order.status);
+
+  const trail = cancelled
+    ? '<p class="muted">Þessi pöntun hefur verið felld niður.</p>'
+    : `<ol class="trail">${ORDER_STATUS_FLOW.map((status, index) => `
+        <li class="${index <= currentIndex ? 'is-done' : ''}">
+          <span class="dot"></span>${escapeHtml(ORDER_STATUS_LABELS[status])}
+        </li>`).join('')}</ol>`;
+
+  const lines = order.items.map((item) => `
+    <tr>
+      <td>${escapeHtml(item.name)}${item.quantity > 1 ? ` × ${item.quantity}` : ''}</td>
+      <td class="right">${escapeHtml(formatISK(item.lineTotalIsk))}</td>
+    </tr>`).join('');
+
+  const body = `
+    <p class="muted">Pöntun <strong>${escapeHtml(order.reference)}</strong> hjá ${escapeHtml(order.tenantName)}</p>
+    ${trail}
+    <table class="lines">
+      <tbody>
+        ${lines}
+        ${order.shippingIsk > 0
+          ? `<tr><td>Sending</td><td class="right">${escapeHtml(formatISK(order.shippingIsk))}</td></tr>`
+          : ''}
+        <tr class="total"><td>Samtals</td><td class="right">${escapeHtml(formatISK(order.totalIsk))}</td></tr>
+      </tbody>
+    </table>
+    <div class="card">
+      <div><strong>${escapeHtml(order.delivery === 'sending' ? 'Sent heim' : 'Sótt á verkstæðið')}</strong></div>
+      ${order.delivery === 'sending'
+        ? `<div class="muted">${escapeHtml([order.address, `${order.postcode} ${order.city}`.trim()].filter(Boolean).join(', '))}</div>`
+        : ''}
+    </div>
+    <p class="muted">Spurningar? Svaraðu staðfestingarpóstinum eða hringdu — hafðu pöntunarnúmerið við höndina.</p>`;
+
+  return standalonePage(`Pöntun ${order.reference}`, body);
+}
+
+function standalonePage(heading: string, bodyHtml: string): string {
+  return `<!doctype html>
+<html lang="is"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escapeHtml(heading)}</title>
+<style>
+:root{color-scheme:light dark}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:center;padding:1.5rem;
+     font:16px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f1f5f9;color:#0f172a}
+main{background:#fff;border-radius:16px;padding:2rem;max-width:32rem;width:100%;
+     box-shadow:0 1px 3px rgba(15,23,42,.1)}
+h1{font-size:1.5rem;margin:0 0 1rem}
+.muted{color:#64748b}
+.card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:1rem;margin:1rem 0}
+.trail{list-style:none;padding:0;margin:1.5rem 0;display:grid;gap:.65rem}
+.trail li{display:flex;align-items:center;gap:.7rem;color:#94a3b8;font-weight:600}
+.trail li.is-done{color:#0f172a}
+.trail .dot{width:.7rem;height:.7rem;border-radius:50%;background:#cbd5e1;flex:none}
+.trail li.is-done .dot{background:#16a34a}
+.lines{width:100%;border-collapse:collapse;margin:1rem 0}
+.lines td{padding:.5rem 0;border-bottom:1px solid #e2e8f0}
+.lines .right{text-align:right;font-variant-numeric:tabular-nums}
+.lines .total td{font-weight:700;border-bottom:0}
+@media (prefers-color-scheme:dark){
+  body{background:#0b1120;color:#e2e8f0}
+  main{background:#131c2e}
+  .card{background:#0f172a;border-color:#1e293b}
+  .lines td{border-color:#1e293b}
+  .trail li.is-done{color:#e2e8f0}
+  .trail .dot{background:#334155}
 }
 </style></head>
 <body><main><h1>${escapeHtml(heading)}</h1>${bodyHtml}</main></body></html>`;

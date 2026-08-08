@@ -14,6 +14,7 @@ export type TenantStatus = 'undirbuningur' | 'virkur' | 'i_bid' | 'haett';
 export const FEATURES = [
   'vefsida',
   'bokanir',
+  'vefverslun',
   'google_calendar',
   'tolvupostur',
   'simsvorun',
@@ -30,6 +31,10 @@ export const FEATURE_LABELS: Record<Feature, { label: string; description: strin
   bokanir: {
     label: 'Bókanakerfi',
     description: 'Netbókanir með lausum tímum, staðfestingum og afbókunartengli.',
+  },
+  vefverslun: {
+    label: 'Vefverslun',
+    description: 'Vörulisti, karfa og pantanir á vefsíðunni — fyrir þá sem selja hluti en ekki tíma.',
   },
   google_calendar: {
     label: 'Google Calendar',
@@ -215,6 +220,124 @@ export interface BookingView extends Booking {
   tenantName: string;
   tenantTimezone: string;
 }
+
+// ---------------------------------------------------------------------------
+// Webstore
+// ---------------------------------------------------------------------------
+
+export type OrderStatus = 'ny' | 'stadfest' | 'i_smidum' | 'tilbuin' | 'afhent' | 'haett';
+export type OrderDelivery = 'saekja' | 'sending';
+export type OrderSource = 'vefur' | 'simi' | 'stjornbord';
+
+export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
+  ny: 'Ný pöntun',
+  stadfest: 'Staðfest',
+  i_smidum: 'Í smíðum',
+  tilbuin: 'Tilbúin',
+  afhent: 'Afhent',
+  haett: 'Hætt við',
+};
+
+/** The order the workshop moves through, used to render the status trail. */
+export const ORDER_STATUS_FLOW: readonly OrderStatus[] = ['ny', 'stadfest', 'i_smidum', 'tilbuin', 'afhent'];
+
+export const ORDER_DELIVERY_LABELS: Record<OrderDelivery, string> = {
+  saekja: 'Sótt á verkstæðið',
+  sending: 'Sent heim',
+};
+
+export interface Product {
+  id: string;
+  tenantId: string;
+  slug: string;
+  name: string;
+  tagline: string;
+  description: string;
+  category: string;
+  material: string;
+  dimensions: string;
+  priceIsk: number;
+  vskRate: number;
+  madeToOrder: boolean;
+  leadTimeDays: number;
+  stock: number;
+  imageUrl: string;
+  isPublic: boolean;
+  active: boolean;
+  sortOrder: number;
+}
+
+export interface OrderItem {
+  id: string;
+  orderId: string;
+  productId: string | null;
+  name: string;
+  variant: string;
+  unitPriceIsk: number;
+  vskRate: number;
+  quantity: number;
+  lineTotalIsk: number;
+  sortOrder: number;
+}
+
+export interface ShopOrder {
+  id: string;
+  tenantId: string;
+  reference: string;
+  customerId: string;
+  status: OrderStatus;
+  delivery: OrderDelivery;
+  source: OrderSource;
+  address: string;
+  postcode: string;
+  city: string;
+  notes: string;
+  internalNotes: string;
+  itemsIsk: number;
+  shippingIsk: number;
+  totalIsk: number;
+  vskIsk: number;
+  statusToken: string;
+  confirmationSentAt: Instant | null;
+  createdAt: Instant;
+  updatedAt: Instant;
+  cancelledAt: Instant | null;
+}
+
+/** An order joined with its lines and the names needed to display it. */
+export interface ShopOrderView extends ShopOrder {
+  items: OrderItem[];
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  tenantName: string;
+  tenantTimezone: string;
+}
+
+/**
+ * Shop policy, stored in the `vefverslun` feature config rather than in new
+ * tenant columns — it is only meaningful when the feature is on.
+ */
+export interface ShopSettings {
+  shippingIsk: number;
+  /** Orders at or above this total ship free. Zero disables the rule. */
+  freeShippingOverIsk: number;
+  allowPickup: boolean;
+  allowShipping: boolean;
+  /** Where to collect a pickup order; falls back to the tenant address. */
+  pickupNote: string;
+  /** Shown at checkout — these shops take payment on collection or by transfer. */
+  paymentNote: string;
+}
+
+export const DEFAULT_SHOP_SETTINGS: ShopSettings = {
+  shippingIsk: 1890,
+  freeShippingOverIsk: 30000,
+  allowPickup: true,
+  allowShipping: true,
+  pickupNote: '',
+  paymentNote: 'Við sendum þér greiðsluupplýsingar með staðfestingunni. Ekkert er skuldfært á vefnum.',
+};
 
 export interface AvailableSlot {
   /** Start of the appointment as shown to the customer. */

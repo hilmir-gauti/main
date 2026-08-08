@@ -13,7 +13,7 @@
  */
 
 import { logger } from '../core/logger.ts';
-import type { BookingView } from './types.ts';
+import type { BookingView, OrderStatus, ShopOrderView } from './types.ts';
 
 export interface DomainEvents {
   'booking.created': { booking: BookingView };
@@ -22,6 +22,8 @@ export interface DomainEvents {
   'booking.rescheduled': { booking: BookingView; previousStartsAt: number };
   'booking.reminder': { booking: BookingView };
   'booking.completed': { booking: BookingView };
+  'order.created': { order: ShopOrderView };
+  'order.status': { order: ShopOrderView; previous: OrderStatus };
   'tenant.provisioned': { tenantId: string };
   'call.finished': { callId: string; tenantId: string | null };
 }
