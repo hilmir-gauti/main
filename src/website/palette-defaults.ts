@@ -23,6 +23,9 @@ const BY_INDUSTRY: Record<string, string> = {
   dekkjaverkstaedi: '#b45309',
   pipulagnir: '#0369a1',
   rafvirki: '#ca8a04',
+  // Dark maple: the colour of the wood itself, which is the only branding a
+  // workshop that sells its own pieces ever has.
+  tresmidi: '#b4682e',
   annad: '#4f46e5',
 };
 

@@ -46,6 +46,9 @@ export const ID_PREFIX = {
   busy: 'upp', // upptekið
   build: 'vef',
   note: 'nta',
+  product: 'vara',
+  order: 'pnt', // pöntun
+  orderItem: 'lin', // lína
 } as const;
 
 export type IdPrefix = (typeof ID_PREFIX)[keyof typeof ID_PREFIX];

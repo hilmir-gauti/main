@@ -25,11 +25,14 @@ import { listServices, listStaff } from '../domain/catalog.ts';
 import { industryPreset } from '../domain/industries.ts';
 import { flowForIndustry } from '../domain/intake/flows.ts';
 import { weeklyHoursMap } from '../domain/schedule.ts';
-import { formatAddress, getTenantOrThrow } from '../domain/tenants.ts';
-import type { Service, Staff, Tenant } from '../domain/types.ts';
+import { listProducts } from '../domain/shop/products.ts';
+import { shopSettings } from '../domain/shop/orders.ts';
+import { formatAddress, getTenantOrThrow, isFeatureEnabled } from '../domain/tenants.ts';
+import type { Product, Service, ShopSettings, Staff, Tenant } from '../domain/types.ts';
 import { buildPalette, variantByKey, variantsForIndustry, type Palette, type Variant } from './theme.ts';
 import { heroMotif, motionScript, motionStyles } from './motion.ts';
 import { resolveBrandColor } from './palette-defaults.ts';
+import { cartMarkup, storefrontScript, storefrontSection, storefrontStyles } from './storefront.ts';
 import { bookingWidgetScript, bookingWidgetStyles } from './widget.ts';
 
 /** E.164 is what we store and dial; "555 1234" is what Icelanders read. */
@@ -53,6 +56,9 @@ export interface SiteContent {
   services: Service[];
   staff: Staff[];
   hours: Record<Weekday, Array<{ openMin: number; closeMin: number }>>;
+  /** Empty unless the webstore feature is on; the shelf renders from these. */
+  products: Product[];
+  shop: ShopSettings | null;
   /** Overrides the tenant's stored copy, e.g. AI-generated text from the wizard. */
   tagline?: string;
   about?: string;
@@ -60,11 +66,17 @@ export interface SiteContent {
 
 export function loadSiteContent(tenantId: string, overrides: { tagline?: string; about?: string } = {}): SiteContent {
   const tenant = getTenantOrThrow(tenantId);
+  const hasShop = isFeatureEnabled(tenantId, 'vefverslun');
+
   return {
     tenant,
     services: listServices(tenantId, { publicOnly: true }),
     staff: listStaff(tenantId, { bookableOnly: true }),
     hours: weeklyHoursMap(tenantId, null),
+    // Sold-out pieces stay on the shelf: "uppselt" on something handmade is a
+    // statement about the workshop, not a dead end.
+    products: hasShop ? listProducts(tenantId, { publicOnly: true }) : [],
+    shop: hasShop ? shopSettings(tenantId) : null,
     ...overrides,
   };
 }
@@ -159,6 +171,13 @@ function trustStrip(content: SiteContent): SafeHtml {
 
   const stats: Array<{ value: string; label: string }> = [];
 
+  if (content.products.length > 0) {
+    stats.push({ value: String(content.products.length), label: 'vörur í verslun' });
+    const madeToOrder = content.products.filter((product) => product.madeToOrder).length;
+    if (madeToOrder > 0) {
+      stats.push({ value: String(madeToOrder), label: 'smíðaðar eftir pöntun' });
+    }
+  }
   if (content.services.length > 0) {
     stats.push({ value: String(content.services.length), label: 'þjónustuliðir í boði' });
   }
@@ -168,7 +187,11 @@ function trustStrip(content: SiteContent): SafeHtml {
   if (openDays > 0) {
     stats.push({ value: `${openDays}`, label: openDays === 1 ? 'opinn dagur í viku' : 'opnir dagar í viku' });
   }
-  stats.push({ value: 'Strax', label: 'staðfesting á bókun' });
+  stats.push(
+    content.products.length > 0
+      ? { value: 'Handverk', label: 'engin tvö eintök eins' }
+      : { value: 'Strax', label: 'staðfesting á bókun' },
+  );
 
   if (stats.length < 3) return html``;
 
@@ -250,11 +273,20 @@ function heroSection(content: SiteContent, variant: Variant, palette: Palette): 
     <div class="hero-aura" aria-hidden="true"><span></span><span></span><span></span></div>
     ${raw(heroMotif(preset.template, palette))}`;
 
-  const actions = html`
-    <div class="hero-actions">
-      <a class="btn btn-primary" href="#bokun">${preset.bookVerb}</a>
-      ${tenant.phone ? html`<a class="btn btn-ghost" href="tel:${tenant.phone}">Hringja ${phoneDisplay(tenant.phone)}</a>` : ''}
-    </div>`;
+  // A shop's front page has one job: get people to the shelf. The booking
+  // button stays, but it stops being the loudest thing on the page.
+  const hasShop = content.products.length > 0;
+  const actions = hasShop
+    ? html`
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#verslun">Skoða verslun</a>
+        <a class="btn btn-ghost" href="#bokun">${preset.bookVerb}</a>
+      </div>`
+    : html`
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#bokun">${preset.bookVerb}</a>
+        ${tenant.phone ? html`<a class="btn btn-ghost" href="tel:${tenant.phone}">Hringja ${phoneDisplay(tenant.phone)}</a>` : ''}
+      </div>`;
 
   if (variant.layout.hero === 'skipt') {
     const badges = [
@@ -363,7 +395,35 @@ function structuredData(content: SiteContent, siteUrl: string): SafeHtml {
     areaServed: { '@type': 'Country', name: 'Ísland' },
   };
 
-  return html`<script type="application/ld+json">${jsonScript(data)}</script>`;
+  // Products get their own graph entry rather than being folded into the
+  // service catalogue: a Product with an availability and a price is what puts
+  // a listing into a shopping result, and a made-to-order piece is genuinely
+  // `PreOrder` rather than `InStock`.
+  const productGraph = content.products.map((product) => ({
+    '@context': 'https://schema.org',
+    '@type': 'Product',
+    name: product.name,
+    description: product.description || product.tagline,
+    ...(product.imageUrl ? { image: product.imageUrl } : {}),
+    ...(product.material ? { material: product.material } : {}),
+    ...(product.category ? { category: product.category } : {}),
+    brand: { '@type': 'Brand', name: tenant.name },
+    offers: {
+      '@type': 'Offer',
+      price: String(product.priceIsk),
+      priceCurrency: 'ISK',
+      url: `${siteUrl}#verslun`,
+      availability: product.madeToOrder
+        ? 'https://schema.org/PreOrder'
+        : product.stock > 0
+          ? 'https://schema.org/InStock'
+          : 'https://schema.org/OutOfStock',
+      seller: { '@type': 'Organization', name: tenant.name },
+    },
+  }));
+
+  return html`<script type="application/ld+json">${jsonScript(data)}</script>
+${productGraph.map((product) => html`<script type="application/ld+json">${jsonScript(product)}</script>`)}`;
 }
 
 /** Inline SVG favicon built from the business's initial and brand colour. */
@@ -398,6 +458,9 @@ export function renderSite(content: SiteContent, options: RenderOptions): string
   const about = content.about || tenant.about;
   const address = formatAddress(tenant);
   const mapQuery = encodeURIComponent(`${tenant.name} ${address}`.trim());
+
+  const hasShop = content.products.length > 0 && content.shop !== null;
+  const shopArt = hasShop ? buildPalette(brandColor, true) : light;
 
   const page = html`<!doctype html>
 <html lang="is">
@@ -475,6 +538,7 @@ ${options.previewNotice ? raw('.preview-banner{background:#0f172a;color:#fff;tex
 ${raw(variant.css(light))}
 ${raw(motionStyles(light))}
 ${raw(bookingWidgetStyles())}
+${hasShop ? raw(storefrontStyles()) : ''}
 @media (max-width:640px){ .hero-actions .btn{flex:1;text-align:center} }
 </style>
 </head>
@@ -485,11 +549,14 @@ ${options.previewNotice ? html`<div class="preview-banner">${options.previewNoti
   <div class="wrap sitenav-inner">
     <a class="brandmark" href="#top"><span class="dot"></span>${tenant.name}</a>
     <ul class="navlinks">
+      ${hasShop ? html`<li><a href="#verslun">Verslun</a></li>` : ''}
       ${content.services.length > 0 ? html`<li><a href="#thjonusta">Þjónusta</a></li>` : ''}
       <li><a href="#um-okkur">Um okkur</a></li>
       <li><a href="#hafa-samband">Hafa samband</a></li>
     </ul>
-    <a class="btn btn-primary btn-sm nav-cta" href="#bokun">${preset.bookVerb}</a>
+    ${hasShop
+      ? html`<a class="btn btn-primary btn-sm nav-cta" href="#verslun">Skoða verslun</a>`
+      : html`<a class="btn btn-primary btn-sm nav-cta" href="#bokun">${preset.bookVerb}</a>`}
   </div>
 </nav>
 
@@ -498,6 +565,21 @@ ${heroSection(content, variant, light)}
 
 <main>
   ${trustStrip(content)}
+
+  ${hasShop
+    ? storefrontSection(
+        {
+          products: content.products,
+          settings: content.shop!,
+          apiBase,
+          slug: tenant.slug,
+          pickupPlace: content.shop!.pickupNote || address,
+          hasCustomWork: content.services.length > 0,
+          bookVerb: preset.bookVerb,
+        },
+        shopArt,
+      )
+    : ''}
 
   ${content.services.length > 0
     ? html`
@@ -573,8 +655,12 @@ ${heroSection(content, variant, light)}
   ${faqSection(content)}
 </main>
 
+${hasShop ? cartMarkup() : ''}
+
 <div class="cta-bar">
-  <a class="btn btn-primary" href="#bokun">${preset.bookVerb}</a>
+  ${hasShop
+    ? html`<a class="btn btn-primary" href="#verslun">Skoða verslun</a>`
+    : html`<a class="btn btn-primary" href="#bokun">${preset.bookVerb}</a>`}
   ${tenant.phone ? html`<a class="btn btn-ghost" href="tel:${tenant.phone}">Hringja</a>` : ''}
 </div>
 
@@ -588,6 +674,7 @@ ${heroSection(content, variant, light)}
 ${structuredData(content, siteUrl)}
 <script>${raw(motionScript())}</script>
 <script>${raw(bookingWidgetScript())}</script>
+${hasShop ? html`<script>${raw(storefrontScript())}</script>` : ''}
 </body>
 </html>`;
 
@@ -757,6 +844,47 @@ export function latestBuild(tenantId: string): BuildRow | null {
     'SELECT id, version, path, template, bytes, built_at FROM website_build WHERE tenant_id = ? ORDER BY version DESC LIMIT 1',
     tenantId,
   );
+}
+
+/**
+ * Config the basket fetches when it is first opened.
+ *
+ * Deliberately narrow: prices, what may still be ordered and how much of it,
+ * plus the shop's own delivery policy. It is the same catalogue the page was
+ * built from, re-read at request time so a basket left open overnight finds
+ * out what sold in the meantime.
+ */
+export function shopConfig(tenantId: string): Record<string, unknown> {
+  const tenant = getTenantOrThrow(tenantId);
+  const settings = shopSettings(tenantId);
+  const products = listProducts(tenantId, { publicOnly: true, availableOnly: true });
+
+  return {
+    verslun: {
+      nafn: tenant.name,
+      simi: phoneDisplay(tenant.phone),
+      gjaldmidill: tenant.currency,
+    },
+    stillingar: {
+      sending: settings.shippingIsk,
+      fritYfir: settings.freeShippingOverIsk,
+      maSaekja: settings.allowPickup,
+      maSenda: settings.allowShipping,
+      afhending: settings.pickupNote || formatAddress(tenant),
+      greidsla: settings.paymentNote,
+    },
+    vorur: products.map((product) => ({
+      id: product.id,
+      heiti: product.name,
+      verd: product.priceIsk,
+      mynd: product.imageUrl,
+      eftirPontun: product.madeToOrder,
+      afgreidsludagar: product.leadTimeDays,
+      // How many the basket may hold: everything left on the shelf, or the
+      // per-line ceiling for something the workshop simply builds more of.
+      hamark: product.madeToOrder ? 20 : Math.min(product.stock, 20),
+    })),
+  };
 }
 
 /** Config the booking widget fetches on load. */

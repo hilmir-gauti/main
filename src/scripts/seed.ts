@@ -1,9 +1,10 @@
 /**
  * Demo data.
  *
- * Creates three tenants that exercise the different scheduling models — a
- * staff-led salon, a resource-pool garage and a one-person plumber — with
- * bookings spread across the coming week so every screen has something to show.
+ * Creates four tenants that exercise the different models — a staff-led salon,
+ * a resource-pool garage, a one-person plumber and a joinery that sells
+ * objects rather than hours — with bookings spread across the coming week and
+ * orders across the workshop's stages, so every screen has something to show.
  *
  *   npm run seed
  */
@@ -14,6 +15,8 @@ import { addDays, hhmmToMinutes, instantFromWallClock, plainDateOf } from '../co
 import { config } from '../config.ts';
 import { createBooking } from '../domain/booking/bookings.ts';
 import { listServices } from '../domain/catalog.ts';
+import { listProducts } from '../domain/shop/products.ts';
+import { createOrder, setOrderStatus } from '../domain/shop/orders.ts';
 import { industryPreset } from '../domain/industries.ts';
 import { provisionTenant } from '../domain/provisioning.ts';
 import { createTenant, getTenantBySlug, updateTenant } from '../domain/tenants.ts';
@@ -21,7 +24,7 @@ import { publishVariant } from '../website/generator.ts';
 import type { Feature } from '../domain/types.ts';
 
 const ALL_FEATURES: Feature[] = [
-  'vefsida', 'bokanir', 'google_calendar', 'tolvupostur', 'simsvorun', 'sms', 'app_tilkynningar',
+  'vefsida', 'bokanir', 'vefverslun', 'google_calendar', 'tolvupostur', 'simsvorun', 'sms', 'app_tilkynningar',
 ];
 
 interface SeedSpec {
@@ -62,6 +65,19 @@ const SEEDS: SeedSpec[] = [
     brandColor: '#b45309',
     capacity: 3,
     variant: 'klassiskt',
+  },
+  {
+    // A workshop that sells objects rather than hours: the webstore, the dark
+    // storefront design, and a shelf that is half stock and half commissions.
+    name: 'Norðanvið Smíði',
+    industry: 'tresmidi',
+    email: 'nordanvid@example.is',
+    phone: '4771234',
+    address: 'Hafnarbraut 8',
+    postcode: '740',
+    domain: 'nordanvid.is',
+    brandColor: '#b4682e',
+    variant: 'skogur',
   },
   {
     name: 'Pípulagnir Kára',
@@ -136,6 +152,7 @@ async function run(): Promise<void> {
 
   let createdTenants = 0;
   let createdBookings = 0;
+  let createdOrders = 0;
 
   for (const spec of SEEDS) {
     if (getTenantBySlug(spec.name.toLowerCase().replace(/[^a-z]/g, '-'))) {
@@ -200,10 +217,44 @@ async function run(): Promise<void> {
       }
     }
 
-    console.log(`· ${spec.name} — ${services.length} þjónustur, vefsíða birt (${spec.variant})`);
+    // --- Orders, for the shops ------------------------------------------
+    const products = listProducts(tenant.id, { publicOnly: true, availableOnly: true });
+    let ordersHere = 0;
+
+    for (let index = 0; index < Math.min(products.length, 3); index++) {
+      const customer = CUSTOMERS[(index + 1) % CUSTOMERS.length]!;
+      const product = products[index]!;
+
+      try {
+        const order = createOrder({
+          tenantId: tenant.id,
+          lines: [{ productId: product.id, quantity: index === 2 ? 2 : 1 }],
+          delivery: index % 2 === 0 ? 'saekja' : 'sending',
+          source: 'vefur',
+          customer,
+          address: index % 2 === 0 ? '' : 'Hlíðargata 4',
+          postcode: index % 2 === 0 ? '' : '740',
+          city: index % 2 === 0 ? '' : 'Neskaupstaður',
+          notes: index === 0 ? 'Má ég fá áletrun á bakhliðina?' : '',
+        });
+        // Spread them across the workshop's stages so every column has rows.
+        if (index === 1) setOrderStatus(order.id, 'i_smidum');
+        if (index === 2) setOrderStatus(order.id, 'tilbuin');
+        ordersHere++;
+        createdOrders++;
+      } catch {
+        // Sold out or shipping disabled — expected while filling a demo shelf.
+      }
+    }
+
+    console.log(
+      `· ${spec.name} — ${services.length} þjónustur`
+      + (products.length > 0 ? `, ${products.length} vörur, ${ordersHere} pantanir` : '')
+      + `, vefsíða birt (${spec.variant})`,
+    );
   }
 
-  console.log(`\nTilbúið: ${createdTenants} viðskiptavinir, ${createdBookings} bókanir.`);
+  console.log(`\nTilbúið: ${createdTenants} viðskiptavinir, ${createdBookings} bókanir, ${createdOrders} pantanir.`);
   console.log(`Opnaðu ${config.baseUrl}/stjornbord\n`);
 
   closeDatabase();

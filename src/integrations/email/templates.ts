@@ -14,7 +14,7 @@ import { escapeHtml } from '../../core/html.ts';
 import { formatISK } from '../../core/iceland.ts';
 import { formatDateTimeIs, formatDurationIs, type Instant } from '../../core/time.ts';
 import { config } from '../../config.ts';
-import type { BookingView, Tenant } from '../../domain/types.ts';
+import type { BookingView, ShopOrderView, Tenant } from '../../domain/types.ts';
 
 export interface RenderedEmail {
   subject: string;
@@ -290,6 +290,178 @@ export function newBookingForOwner(tenant: Tenant, booking: BookingView, duratio
         label: 'Opna stjórnborð',
         text: 'Sjá allar bókanir dagsins.',
       },
+    }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Webstore
+// ---------------------------------------------------------------------------
+
+function orderLines(order: ShopOrderView): string {
+  return order.items
+    .map((item) => `  ${item.name}${item.quantity > 1 ? ` × ${item.quantity}` : ''} — ${formatISK(item.lineTotalIsk)}`)
+    .join('\n');
+}
+
+function orderRows(order: ShopOrderView): Array<[string, string]> {
+  return [
+    ...order.items.map((item): [string, string] => [
+      item.quantity > 1 ? `${item.name} × ${item.quantity}` : item.name,
+      formatISK(item.lineTotalIsk),
+    ]),
+    ...(order.shippingIsk > 0 ? [['Sending', formatISK(order.shippingIsk)] as [string, string]] : []),
+    ['Samtals', formatISK(order.totalIsk)],
+  ];
+}
+
+const orderUrl = (order: ShopOrderView) => `${config.baseUrl}/pontun/${order.statusToken}`;
+
+/**
+ * The customer's receipt.
+ *
+ * It is explicit about the two things that surprise people about ordering
+ * something handmade: nothing has been charged yet, and the piece does not
+ * exist until it is built.
+ */
+export function orderConfirmation(tenant: Tenant, order: ShopOrderView, paymentNote: string): RenderedEmail {
+  const delivery = order.delivery === 'sending'
+    ? `Sent á ${[order.address, `${order.postcode} ${order.city}`.trim()].filter(Boolean).join(', ')}`
+    : 'Sótt á verkstæðið';
+
+  return {
+    subject: `Pöntun ${order.reference} — ${tenant.name}`,
+    text: textBlock([
+      `Sæl/l ${order.customerName},`,
+      '',
+      `Takk fyrir pöntunina hjá ${tenant.name}. Pöntunarnúmerið þitt er ${order.reference}.`,
+      '',
+      orderLines(order),
+      order.shippingIsk > 0 && `  Sending — ${formatISK(order.shippingIsk)}`,
+      `  Samtals: ${formatISK(order.totalIsk)}`,
+      '',
+      `Afhending: ${delivery}`,
+      order.notes && `Athugasemd þín: ${order.notes}`,
+      '',
+      paymentNote,
+      '',
+      `Fylgstu með stöðunni hér: ${orderUrl(order)}`,
+      '',
+      tenant.name,
+      tenant.phone && `Sími: ${tenant.phone}`,
+    ]),
+    html: layout({
+      tenant,
+      heading: `Pöntun ${order.reference}`,
+      intro: `Sæl/l ${order.customerName}, takk fyrir pöntunina. Við förum yfir hana og höfum samband.`,
+      rows: [...orderRows(order), ['Afhending', delivery], ['Athugasemd', order.notes]],
+      callout: {
+        url: orderUrl(order),
+        label: 'Sjá stöðu pöntunar',
+        text: paymentNote,
+      },
+      footerNote: 'Hver hlutur er handsmíðaður — við látum vita um leið og hann er tilbúinn.',
+    }),
+  };
+}
+
+/** Sent to the workshop the moment an order arrives. */
+export function newOrderForOwner(tenant: Tenant, order: ShopOrderView): RenderedEmail {
+  const delivery = order.delivery === 'sending'
+    ? `Senda á ${[order.address, `${order.postcode} ${order.city}`.trim()].filter(Boolean).join(', ')}`
+    : 'Sótt á verkstæðið';
+
+  return {
+    subject: `Ný pöntun ${order.reference} — ${formatISK(order.totalIsk)}`,
+    text: textBlock([
+      `Ný pöntun kom inn á vefnum.`,
+      '',
+      `Pöntun: ${order.reference}`,
+      `Viðskiptavinur: ${order.customerName}`,
+      order.customerPhone && `Sími: ${order.customerPhone}`,
+      order.customerEmail && `Netfang: ${order.customerEmail}`,
+      '',
+      orderLines(order),
+      order.shippingIsk > 0 && `  Sending — ${formatISK(order.shippingIsk)}`,
+      `  Samtals: ${formatISK(order.totalIsk)}`,
+      '',
+      `Afhending: ${delivery}`,
+      order.notes && `Athugasemd: ${order.notes}`,
+      '',
+      `Opna í stjórnborði: ${config.baseUrl}/vidskiptavinir/${tenant.id}/pantanir`,
+    ]),
+    html: layout({
+      tenant,
+      heading: `Ný pöntun · ${order.reference}`,
+      intro: `${order.customerName} pantaði ${order.items.length === 1 ? 'eina vöru' : `${order.items.length} vörur`} á vefnum.`,
+      rows: [
+        ['Viðskiptavinur', order.customerName],
+        ['Sími', order.customerPhone],
+        ['Netfang', order.customerEmail],
+        ...orderRows(order),
+        ['Afhending', delivery],
+        ['Athugasemd', order.notes],
+      ],
+      callout: {
+        url: `${config.baseUrl}/vidskiptavinir/${tenant.id}/pantanir`,
+        label: 'Opna stjórnborð',
+        text: 'Staðfestu pöntunina og sendu greiðsluupplýsingar.',
+      },
+    }),
+  };
+}
+
+/** Sent when the workshop moves an order to a status the customer cares about. */
+export function orderStatusUpdate(tenant: Tenant, order: ShopOrderView): RenderedEmail {
+  const headings: Partial<Record<ShopOrderView['status'], { heading: string; intro: string }>> = {
+    stadfest: {
+      heading: 'Pöntunin er staðfest',
+      intro: 'Við höfum tekið pöntunina þína frá og byrjum á henni.',
+    },
+    i_smidum: {
+      heading: 'Pöntunin er komin í smíði',
+      intro: 'Vinnan er hafin. Við látum vita um leið og hluturinn er tilbúinn.',
+    },
+    tilbuin: {
+      heading: 'Pöntunin er tilbúin',
+      intro: order.delivery === 'sending'
+        ? 'Hluturinn er tilbúinn og fer af stað til þín.'
+        : 'Hluturinn er tilbúinn og bíður þín á verkstæðinu.',
+    },
+    afhent: {
+      heading: 'Pöntunin er afhent',
+      intro: 'Takk fyrir viðskiptin — við vonum að hluturinn eigi eftir að endast lengi.',
+    },
+    haett: {
+      heading: 'Pöntunin hefur verið felld niður',
+      intro: 'Pöntunin þín hefur verið felld niður. Hafðu samband ef þetta kemur á óvart.',
+    },
+  };
+
+  const copy = headings[order.status] ?? { heading: 'Staða pöntunar', intro: 'Staðan á pöntuninni þinni hefur breyst.' };
+
+  return {
+    subject: `${copy.heading} — ${order.reference}`,
+    text: textBlock([
+      `Sæl/l ${order.customerName},`,
+      '',
+      copy.intro,
+      '',
+      `Pöntun: ${order.reference}`,
+      orderLines(order),
+      `  Samtals: ${formatISK(order.totalIsk)}`,
+      '',
+      `Staða pöntunar: ${orderUrl(order)}`,
+      '',
+      tenant.name,
+      tenant.phone && `Sími: ${tenant.phone}`,
+    ]),
+    html: layout({
+      tenant,
+      heading: copy.heading,
+      intro: copy.intro,
+      rows: orderRows(order),
+      callout: { url: orderUrl(order), label: 'Sjá stöðu pöntunar', text: `Pöntunarnúmer ${order.reference}.` },
     }),
   };
 }

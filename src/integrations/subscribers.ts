@@ -12,7 +12,7 @@
  */
 
 import { get } from '../core/db.ts';
-import { canReceiveSms } from '../core/iceland.ts';
+import { canReceiveSms, formatISK } from '../core/iceland.ts';
 import { logger } from '../core/logger.ts';
 import { formatDateTimeIs, relativeIs } from '../core/time.ts';
 import { config } from '../config.ts';
@@ -20,6 +20,7 @@ import { markConfirmationSent, markReminderSent } from '../domain/booking/bookin
 import { getServiceOrThrow } from '../domain/catalog.ts';
 import { on } from '../domain/events.ts';
 import { intakeHeadline } from '../domain/intake/service.ts';
+import { markOrderConfirmationSent, shopSettings } from '../domain/shop/orders.ts';
 import { getTenantOrThrow, isFeatureEnabled } from '../domain/tenants.ts';
 import type { BookingView } from '../domain/types.ts';
 import { pushBooking, removeBookingEvent } from './google/calendar.ts';
@@ -30,6 +31,9 @@ import {
   bookingReminder,
   bookingRescheduled,
   newBookingForOwner,
+  newOrderForOwner,
+  orderConfirmation,
+  orderStatusUpdate,
   voicemailNotification,
 } from './email/templates.ts';
 import { sendPush } from './push/expo.ts';
@@ -262,6 +266,97 @@ export function registerSubscribers(): void {
     // retried on every worker tick.
     void sent;
     markReminderSent(booking.id);
+  });
+
+  // -------------------------------------------------------------------------
+  // Webstore: an order arrived.
+  // -------------------------------------------------------------------------
+  on('order.created', async ({ order }) => {
+    const tenant = getTenantOrThrow(order.tenantId);
+    const summary = order.items
+      .map((item) => (item.quantity > 1 ? `${item.name} × ${item.quantity}` : item.name))
+      .join(', ');
+
+    await attempt('push', { orderId: order.id }, () =>
+      sendPush({
+        tenantId: tenant.id,
+        kind: 'ny_pontun',
+        title: `Ný pöntun · ${formatISK(order.totalIsk)}`,
+        body: `${order.customerName}\n${summary}`,
+        data: { orderId: order.id, url: `${config.baseUrl}/vidskiptavinir/${tenant.id}/pantanir` },
+      }),
+    );
+
+    const recipient = tenant.voicemailEmail || tenant.email;
+    if (recipient) {
+      const mail = newOrderForOwner(tenant, order);
+      await attempt('owner-order-email', { orderId: order.id }, () =>
+        sendMail({
+          tenantId: tenant.id,
+          to: recipient,
+          subject: mail.subject,
+          text: mail.text,
+          html: mail.html,
+          template: 'ny_pontun_eigandi',
+        }),
+      );
+    }
+
+    if (order.customerEmail) {
+      const mail = orderConfirmation(tenant, order, shopSettings(tenant.id).paymentNote);
+      await attempt('order-confirmation', { orderId: order.id }, async () => {
+        const result = await sendMail({
+          tenantId: tenant.id,
+          to: { name: order.customerName, email: order.customerEmail },
+          subject: mail.subject,
+          text: mail.text,
+          html: mail.html,
+          template: 'pontun_stadfest',
+        });
+        if (result.status !== 'villa') markOrderConfirmationSent(order.id);
+      });
+      return;
+    }
+
+    // No email address — an SMS with the reference is the only receipt we can
+    // give, and the workshop still has the phone number to call back on.
+    if (isFeatureEnabled(tenant.id, 'sms') && canReceiveSms(order.customerPhone)) {
+      await attempt('order-sms', { orderId: order.id }, async () => {
+        const result = await sendSms({
+          tenantId: tenant.id,
+          to: order.customerPhone,
+          body:
+            `${tenant.name}: Pöntun ${order.reference} móttekin — ${formatISK(order.totalIsk)}. `
+            + `Staða: ${config.baseUrl}/pontun/${order.statusToken}`,
+          template: 'pontun_stadfest',
+        });
+        if (result.status !== 'villa') markOrderConfirmationSent(order.id);
+      });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Webstore: the workshop moved an order along.
+  // -------------------------------------------------------------------------
+  on('order.status', async ({ order, previous }) => {
+    if (order.status === previous || !order.customerEmail) return;
+    // 'ny' is the state an order is created in, so it never warrants a mail of
+    // its own — the confirmation already went out.
+    if (order.status === 'ny') return;
+
+    const tenant = getTenantOrThrow(order.tenantId);
+    const mail = orderStatusUpdate(tenant, order);
+
+    await attempt('order-status-email', { orderId: order.id, status: order.status }, () =>
+      sendMail({
+        tenantId: tenant.id,
+        to: { name: order.customerName, email: order.customerEmail },
+        subject: mail.subject,
+        text: mail.text,
+        html: mail.html,
+        template: `pontun_${order.status}`,
+      }),
+    );
   });
 
   // -------------------------------------------------------------------------

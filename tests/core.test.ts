@@ -26,7 +26,7 @@ import { buildMessage, encodeHeaderValue } from '../src/integrations/email/smtp.
 import { checkSmtpSettings, diagnoseSmtpError } from '../src/integrations/email/diagnose.ts';
 import { buildEmailPlan } from '../src/integrations/email/provisioning.ts';
 import { classifyIntent } from '../src/integrations/voice/receptionist.ts';
-import { buildPalette, luminance, variantsForIndustry } from '../src/website/theme.ts';
+import { VARIANTS, buildPalette, luminance, variantsForIndustry } from '../src/website/theme.ts';
 
 describe('kennitala', () => {
   it('samþykkir gilda kennitölu einstaklings', () => {
@@ -517,8 +517,12 @@ describe('útlit vefsíðna', () => {
     const forGarage = variantsForIndustry('bilaverkstaedi');
     assert.equal(forGarage[0]?.key, 'klassiskt');
 
-    // Every industry still gets all three options.
-    assert.equal(forSalon.length, 3);
+    const forWorkshop = variantsForIndustry('tresmidi');
+    assert.equal(forWorkshop[0]?.key, 'skogur', 'dökka verslunarútlitið hentar smiðju best');
+
+    // Every industry still gets every option — the order is the only thing
+    // the trade changes.
+    assert.equal(forSalon.length, VARIANTS.length);
   });
 
   it('fellur aftur á sjálfgefinn lit þegar gildið er ógilt', () => {

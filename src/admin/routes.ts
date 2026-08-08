@@ -41,6 +41,8 @@ import {
   upcomingBookings,
 } from '../domain/booking/bookings.ts';
 import { createService, listServices, listStaff, updateService } from '../domain/catalog.ts';
+import { createProduct, listProducts, updateProduct } from '../domain/shop/products.ts';
+import { listOrders, orderStats, setOrderStatus, shopSettings } from '../domain/shop/orders.ts';
 import { flowForIndustry, flowSummary } from '../domain/intake/flows.ts';
 import { bookingAnswerSummary } from '../domain/intake/service.ts';
 import { INDUSTRIES, industryLabel, industryPreset } from '../domain/industries.ts';
@@ -59,11 +61,21 @@ import {
   createTenant,
   getFeatures,
   getTenantOrThrow,
+  isFeatureEnabled,
   listTenants,
+  setFeature,
   updateTenant,
   validateTenantInput,
 } from '../domain/tenants.ts';
-import { FEATURES, FEATURE_LABELS, type Feature } from '../domain/types.ts';
+import {
+  FEATURES,
+  FEATURE_LABELS,
+  ORDER_DELIVERY_LABELS,
+  ORDER_STATUS_FLOW,
+  ORDER_STATUS_LABELS,
+  type Feature,
+  type OrderStatus,
+} from '../domain/types.ts';
 import { SETTING_KEYS, saveSettings } from '../domain/settings.ts';
 import { buildEmailPlan, verifyEmailDns, type EmailProvider } from '../integrations/email/provisioning.ts';
 import { listMessages, testSmtpConnection } from '../integrations/email/mailer.ts';
@@ -113,6 +125,15 @@ function tenantTabs(tenantId: string, active: string): SafeHtml {
     { key: 'simtol', label: 'Símtöl', href: `/vidskiptavinir/${tenantId}/simtol` },
     { key: 'stillingar', label: 'Stillingar', href: `/vidskiptavinir/${tenantId}/stillingar` },
   ];
+
+  // Shop tabs only exist for shops. A hairdresser has no use for a shelf, and
+  // a nine-tab strip is harder to read than a seven-tab one.
+  if (isFeatureEnabled(tenantId, 'vefverslun')) {
+    tabs.splice(5, 0,
+      { key: 'verslun', label: 'Verslun', href: `/vidskiptavinir/${tenantId}/verslun` },
+      { key: 'pantanir', label: 'Pantanir', href: `/vidskiptavinir/${tenantId}/pantanir` },
+    );
+  }
   return html`<div class="tabs">
     ${tabs.map((tab) => html`<a href="${tab.href}" class="${tab.key === active ? 'is-active' : ''}">${tab.label}</a>`)}
   </div>`;
@@ -405,10 +426,17 @@ export function adminRouter(): Router {
       ? `/vidskiptavinir/${tenant.id}/vefur`
       : `/vidskiptavinir/${tenant.id}/verkefni`;
 
+    const created = [
+      `${result.servicesCreated} þjónustur`,
+      result.productsCreated > 0 ? `${result.productsCreated} vörur` : '',
+      `${result.variantsBuilt} útlitstillögur`,
+      `${result.tasksCreated} verkefni`,
+    ].filter(Boolean);
+
     return redirect(
       withFlash(
         destination,
-        `${tenant.name} stofnað. ${result.servicesCreated} þjónustur, ${result.variantsBuilt} útlitstillögur og ${result.tasksCreated} verkefni tilbúin.`,
+        `${tenant.name} stofnað. ${created.join(', ')} tilbúin.`,
       ),
     );
   }, guardWrite);
@@ -1092,6 +1120,306 @@ export function adminRouter(): Router {
   }, guardWrite);
 
   // =======================================================================
+  // Webstore
+  // =======================================================================
+
+  router.get('/vidskiptavinir/:id/verslun', (ctx) => {
+    const tenant = getTenantOrThrow(ctx.params.id ?? '');
+    const products = listProducts(tenant.id, { includeInactive: true });
+    const settings = shopSettings(tenant.id);
+    const stats = orderStats(tenant.id);
+    const missingImages = products.filter((product) => !product.imageUrl).length;
+
+    return htmlResponse(
+      page(
+        { title: `Verslun — ${tenant.name}`, session: ctx.session, active: 'vidskiptavinir', flash: flashFrom(ctx), wide: true,
+          breadcrumb: [{ label: 'Viðskiptavinir', href: '/vidskiptavinir' }, { label: tenant.name, href: `/vidskiptavinir/${tenant.id}` }, { label: 'Verslun' }] },
+        html`
+          <div class="head">
+            <div><h1>Vefverslun</h1><p class="sub">Vörulisti, birgðir og afhending.</p></div>
+            <div class="btn-row">
+              <a class="btn btn-ghost" href="/v/${tenant.slug}#verslun" target="_blank" rel="noopener">Skoða verslun</a>
+            </div>
+          </div>
+          ${tenantTabs(tenant.id, 'verslun')}
+
+          <div class="grid grid-4">
+            ${statCard(products.filter((product) => product.active && product.isPublic).length, 'Vörur á vefnum')}
+            ${statCard(stats.open, 'Pantanir í vinnslu')}
+            ${statCard(money(stats.recentIsk), 'Velta síðustu 30 daga')}
+            ${statCard(missingImages, 'Vörur án myndar', missingImages > 0 ? 'Myndlausar vörur seljast illa.' : 'Allt komið.')}
+          </div>
+
+          <div class="panel" style="margin-top:1rem">
+            <h2>Ný vara</h2>
+            <form method="post" action="/vidskiptavinir/${tenant.id}/verslun/ny">
+              ${csrfField(ctx.session)}
+              <div class="grid grid-2">
+                ${textField('heiti', 'Heiti', '')}
+                ${textField('verd', 'Verð (kr.)', '0', 'number')}
+                ${textField('flokkur', 'Flokkur', '', 'text', 'T.d. Skurðarbretti — flokkar birtast sem síur í versluninni.')}
+                ${textField('efni', 'Efni', '', 'text', 'T.d. Eik og epoxý.')}
+                ${textField('staerd', 'Stærð', '', 'text', 'T.d. 30 × 40 cm.')}
+                ${textField('mynd', 'Slóð myndar', '', 'url', 'Bein slóð á mynd (https://…).')}
+              </div>
+              <div class="field">
+                <label for="lysing">Lýsing</label>
+                <textarea id="lysing" name="lysing" rows="3" placeholder="Hvað er þetta, úr hverju og fyrir hvern?"></textarea>
+              </div>
+              <div class="grid grid-2">
+                <label class="check">
+                  <input type="checkbox" name="eftirPontun" checked>
+                  <span><strong>Smíðað eftir pöntun</strong>
+                  <span>Engar birgðir taldar — afgreiðslutíminn birtist í staðinn.</span></span>
+                </label>
+                ${textField('dagar', 'Afgreiðslutími (dagar)', '21', 'number')}
+              </div>
+              <button class="btn btn-primary" type="submit">Bæta við vöru</button>
+            </form>
+          </div>
+
+          <div class="panel" style="margin-top:1rem">
+            <h2>Vörulisti</h2>
+            ${products.length === 0
+              ? emptyState('Engar vörur skráðar ennþá.')
+              : html`<div class="grid grid-2">
+                  ${products.map((product) => html`
+                    <form class="panel" method="post" action="/vidskiptavinir/${tenant.id}/verslun/${product.id}"
+                          style="margin:0">
+                      ${csrfField(ctx.session)}
+                      <div class="grid grid-2">
+                        ${scopedField(product.id, 'heiti', 'Heiti', product.name)}
+                        ${scopedField(product.id, 'verd', 'Verð (kr.)', String(product.priceIsk), 'number')}
+                        ${scopedField(product.id, 'flokkur', 'Flokkur', product.category)}
+                        ${scopedField(product.id, 'efni', 'Efni', product.material)}
+                        ${scopedField(product.id, 'staerd', 'Stærð', product.dimensions)}
+                        ${scopedField(product.id, 'mynd', 'Slóð myndar', product.imageUrl, 'url')}
+                      </div>
+                      ${scopedField(product.id, 'undirtitill', 'Stutt lýsing', product.tagline)}
+                      <div class="field">
+                        <label for="${product.id}-lysing">Lýsing</label>
+                        <textarea id="${product.id}-lysing" name="lysing" rows="3">${product.description}</textarea>
+                      </div>
+                      <div class="grid grid-2">
+                        <label class="check">
+                          <input type="checkbox" name="eftirPontun" ${product.madeToOrder ? 'checked' : ''}>
+                          <span><strong>Smíðað eftir pöntun</strong>
+                          <span>Selst aldrei upp — afgreiðslutíminn birtist í staðinn.</span></span>
+                        </label>
+                        ${product.madeToOrder
+                          ? scopedField(product.id, 'dagar', 'Afgreiðslutími (dagar)', String(product.leadTimeDays), 'number')
+                          : scopedField(product.id, 'birgdir', 'Til á lager', String(product.stock), 'number')}
+                      </div>
+                      <div class="btn-row" style="align-items:center;gap:1rem">
+                        <label class="check">
+                          <input type="checkbox" name="syna" ${product.isPublic ? 'checked' : ''}>
+                          <span><strong>Birta á vefnum</strong></span>
+                        </label>
+                        <label class="check">
+                          <input type="checkbox" name="virk" ${product.active ? 'checked' : ''}>
+                          <span><strong>Virk</strong></span>
+                        </label>
+                        <button class="btn btn-ghost btn-sm" type="submit">Vista</button>
+                      </div>
+                    </form>`)}
+                </div>`}
+          </div>
+
+          <div class="panel" style="margin-top:1rem">
+            <h2>Afhending og greiðsla</h2>
+            <form method="post" action="/vidskiptavinir/${tenant.id}/verslun/stillingar">
+              ${csrfField(ctx.session)}
+              <div class="grid grid-2">
+                ${numberField('sending', 'Sendingarkostnaður (kr.)', settings.shippingIsk, 0, 100000)}
+                ${numberField('fritYfir', 'Frí sending yfir (kr., 0 = engin)', settings.freeShippingOverIsk, 0, 1000000)}
+              </div>
+              <div class="grid grid-2">
+                <label class="check">
+                  <input type="checkbox" name="maSaekja" ${settings.allowPickup ? 'checked' : ''}>
+                  <span><strong>Hægt að sækja</strong>
+                  <span>Viðskiptavinur sækir á verkstæðið.</span></span>
+                </label>
+                <label class="check">
+                  <input type="checkbox" name="maSenda" ${settings.allowShipping ? 'checked' : ''}>
+                  <span><strong>Hægt að senda</strong>
+                  <span>Sendingarkostnaður leggst á pöntunina.</span></span>
+                </label>
+              </div>
+              ${textField('afhending', 'Afhendingarstaður', settings.pickupNote, 'text', 'Sjálfgefið er heimilisfang fyrirtækisins.')}
+              <div class="field">
+                <label for="greidsla">Texti um greiðslu</label>
+                <textarea id="greidsla" name="greidsla" rows="2">${settings.paymentNote}</textarea>
+                <p class="help">Birtist í körfunni og í staðfestingarpóstinum.</p>
+              </div>
+              <button class="btn btn-primary" type="submit">Vista stillingar</button>
+            </form>
+          </div>`,
+      ),
+    );
+  }, guard);
+
+  router.post('/vidskiptavinir/:id/verslun/stillingar', (ctx) => {
+    const tenantId = ctx.params.id ?? '';
+    const form = ctx.form();
+
+    setFeature(tenantId, 'vefverslun', true, {
+      shippingIsk: Math.max(0, Number(form.sending) || 0),
+      freeShippingOverIsk: Math.max(0, Number(form.fritYfir) || 0),
+      allowPickup: form.maSaekja === 'on',
+      allowShipping: form.maSenda === 'on',
+      pickupNote: (form.afhending ?? '').slice(0, 200),
+      paymentNote: (form.greidsla ?? '').slice(0, 400),
+    });
+
+    return redirect(withFlash(`/vidskiptavinir/${tenantId}/verslun`, 'Stillingar verslunar vistaðar.'));
+  }, guardWrite);
+
+  router.post('/vidskiptavinir/:id/verslun/ny', (ctx) => {
+    const tenantId = ctx.params.id ?? '';
+    const form = ctx.form();
+
+    try {
+      const product = createProduct(tenantId, {
+        name: form.heiti ?? '',
+        priceIsk: Number(form.verd) || 0,
+        category: form.flokkur,
+        material: form.efni,
+        dimensions: form.staerd,
+        description: form.lysing,
+        imageUrl: form.mynd,
+        madeToOrder: form.eftirPontun === 'on',
+        leadTimeDays: Number(form.dagar) || 0,
+        stock: form.eftirPontun === 'on' ? 0 : 1,
+      });
+      return redirect(withFlash(`/vidskiptavinir/${tenantId}/verslun`, `„${product.name}“ bætt í vörulistann.`));
+    } catch (error) {
+      const message = error instanceof ValidationError
+        ? Object.values(error.fieldErrors).join(' ')
+        : error instanceof Error ? error.message : 'Ekki tókst að skrá vöruna.';
+      return redirect(withFlash(`/vidskiptavinir/${tenantId}/verslun`, message || 'Ekki tókst að skrá vöruna.', 'villa'));
+    }
+  }, guardWrite);
+
+  router.post('/vidskiptavinir/:id/verslun/:productId', (ctx) => {
+    const tenantId = ctx.params.id ?? '';
+    const form = ctx.form();
+    const madeToOrder = form.eftirPontun === 'on';
+
+    updateProduct(ctx.params.productId ?? '', {
+      name: form.heiti,
+      priceIsk: Number(form.verd),
+      category: form.flokkur,
+      material: form.efni,
+      dimensions: form.staerd,
+      tagline: form.undirtitill,
+      description: form.lysing,
+      imageUrl: form.mynd,
+      madeToOrder,
+      // Only one of the two is on the form at a time, depending on which kind
+      // of product this is.
+      ...(madeToOrder ? { leadTimeDays: Number(form.dagar) } : { stock: Number(form.birgdir) }),
+      isPublic: form.syna === 'on',
+      active: form.virk === 'on',
+    });
+
+    return redirect(withFlash(`/vidskiptavinir/${tenantId}/verslun`, 'Vara uppfærð.'));
+  }, guardWrite);
+
+  router.get('/vidskiptavinir/:id/pantanir', (ctx) => {
+    const tenant = getTenantOrThrow(ctx.params.id ?? '');
+    const status = ctx.query.get('stada') as OrderStatus | null;
+    const orders = listOrders({
+      tenantId: tenant.id,
+      status: status && ORDER_STATUS_LABELS[status] ? status : undefined,
+      limit: 200,
+    });
+    const stats = orderStats(tenant.id);
+
+    return htmlResponse(
+      page(
+        { title: `Pantanir — ${tenant.name}`, session: ctx.session, active: 'vidskiptavinir', flash: flashFrom(ctx), wide: true,
+          breadcrumb: [{ label: 'Viðskiptavinir', href: '/vidskiptavinir' }, { label: tenant.name, href: `/vidskiptavinir/${tenant.id}` }, { label: 'Pantanir' }] },
+        html`
+          <div class="head"><div><h1>Pantanir</h1></div></div>
+          ${tenantTabs(tenant.id, 'pantanir')}
+
+          <div class="grid grid-4">
+            ${statCard(stats.open, 'Í vinnslu')}
+            ${statCard(stats.recent, 'Síðustu 30 dagar')}
+            ${statCard(money(stats.recentIsk), 'Velta 30 daga')}
+            ${statCard(orders.length, 'Sýndar pantanir')}
+          </div>
+
+          <div class="tabs" style="margin-top:1rem">
+            <a href="/vidskiptavinir/${tenant.id}/pantanir" class="${!status ? 'is-active' : ''}">Allar</a>
+            ${ORDER_STATUS_FLOW.map((key) => html`
+              <a href="/vidskiptavinir/${tenant.id}/pantanir?stada=${key}"
+                 class="${status === key ? 'is-active' : ''}">${ORDER_STATUS_LABELS[key]}</a>`)}
+          </div>
+
+          <div class="panel">
+            ${orders.length === 0
+              ? emptyState('Engar pantanir ennþá.')
+              : html`<div class="table-wrap"><table>
+                  <thead><tr>
+                    <th>Pöntun</th><th>Viðskiptavinur</th><th>Vörur</th><th>Afhending</th>
+                    <th>Upphæð</th><th>Staða</th><th></th>
+                  </tr></thead>
+                  <tbody>
+                    ${orders.map((order) => html`
+                      <tr>
+                        <td>
+                          <strong>${order.reference}</strong><br>
+                          <span class="small muted">${when(order.createdAt, tenant.timezone)}</span>
+                        </td>
+                        <td>
+                          ${order.customerName}<br>
+                          <span class="small muted">${order.customerPhone || order.customerEmail}</span>
+                        </td>
+                        <td class="small">
+                          ${order.items.map((item) => html`
+                            <div>${item.name}${item.quantity > 1 ? ` × ${item.quantity}` : ''}</div>`)}
+                          ${order.notes ? html`<div class="muted">„${order.notes}“</div>` : ''}
+                        </td>
+                        <td class="small">
+                          ${ORDER_DELIVERY_LABELS[order.delivery]}
+                          ${order.delivery === 'sending'
+                            ? html`<br><span class="muted">${order.address}, ${order.postcode} ${order.city}</span>`
+                            : ''}
+                        </td>
+                        <td>${money(order.totalIsk)}</td>
+                        <td>${ORDER_STATUS_LABELS[order.status]}</td>
+                        <td>
+                          <form method="post" action="/pantanir/${order.id}/stada" class="btn-row">
+                            ${csrfField(ctx.session)}
+                            <select name="stada">
+                              ${(Object.keys(ORDER_STATUS_LABELS) as OrderStatus[]).map((key) => html`
+                                <option value="${key}" ${key === order.status ? 'selected' : ''}>
+                                  ${ORDER_STATUS_LABELS[key]}
+                                </option>`)}
+                            </select>
+                            <button class="btn btn-ghost btn-sm" type="submit">Vista</button>
+                          </form>
+                        </td>
+                      </tr>`)}
+                  </tbody>
+                </table></div>`}
+          </div>`,
+      ),
+    );
+  }, guard);
+
+  router.post('/pantanir/:id/stada', (ctx) => {
+    const order = setOrderStatus(ctx.params.id ?? '', ctx.form().stada as OrderStatus);
+    return redirect(
+      withFlash(
+        `/vidskiptavinir/${order.tenantId}/pantanir`,
+        `Pöntun ${order.reference}: ${ORDER_STATUS_LABELS[order.status]}.`,
+      ),
+    );
+  }, guardWrite);
+
+  // =======================================================================
   // Calls
   // =======================================================================
 
@@ -1501,6 +1829,20 @@ function textField(name: string, label: string, value: string, type = 'text', he
       <label for="${name}">${label}</label>
       <input id="${name}" name="${name}" type="${type}" value="${value}">
       ${help ? html`<p class="help">${help}</p>` : ''}
+    </div>`;
+}
+
+/**
+ * Like `textField`, but with the id namespaced to one record.
+ *
+ * The product list renders a form per product, so a shared `id="heiti"` would
+ * repeat down the page and every label would point at the first one.
+ */
+function scopedField(scope: string, name: string, label: string, value: string, type = 'text'): SafeHtml {
+  return html`
+    <div class="field">
+      <label for="${scope}-${name}">${label}</label>
+      <input id="${scope}-${name}" name="${name}" type="${type}" value="${value}">
     </div>`;
 }
 

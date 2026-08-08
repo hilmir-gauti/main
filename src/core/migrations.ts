@@ -455,8 +455,103 @@ ALTER TABLE website_build ADD COLUMN deploy_state TEXT NOT NULL DEFAULT '';
 ALTER TABLE website_build ADD COLUMN deployed_at INTEGER;
 `;
 
+/**
+ * The webstore.
+ *
+ * Some trades sell objects rather than hours — a joinery ships cutting boards
+ * and coffee tables, and no amount of booking software helps with that. An
+ * order is deliberately *not* modelled as a booking: it has no place in a
+ * diary, it holds several lines, and it moves through a workshop rather than
+ * through a calendar.
+ *
+ * Money is stored per line as it was at the moment of ordering. A price change
+ * next month must not rewrite what someone already agreed to pay, so the line
+ * carries its own name and unit price and the product reference is only used
+ * for stock and for linking back.
+ */
+const webshop = `
+CREATE TABLE product (
+  id            TEXT PRIMARY KEY,
+  tenant_id     TEXT NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
+  slug          TEXT NOT NULL,
+  name          TEXT NOT NULL,
+  tagline       TEXT NOT NULL DEFAULT '',
+  description   TEXT NOT NULL DEFAULT '',
+  category      TEXT NOT NULL DEFAULT '',
+  -- What it is made of and how big it is: the two questions every buyer of a
+  -- handmade wooden object asks, and the two facts every listing photo lacks.
+  material      TEXT NOT NULL DEFAULT '',
+  dimensions    TEXT NOT NULL DEFAULT '',
+  price_isk     INTEGER NOT NULL DEFAULT 0,
+  vsk_rate      REAL NOT NULL DEFAULT 0.24,
+  -- Made to order: no stock is tracked, and the lead time is shown instead.
+  made_to_order INTEGER NOT NULL DEFAULT 0,
+  lead_time_days INTEGER NOT NULL DEFAULT 0,
+  stock         INTEGER NOT NULL DEFAULT 0,
+  image_url     TEXT NOT NULL DEFAULT '',
+  is_public     INTEGER NOT NULL DEFAULT 1,
+  active        INTEGER NOT NULL DEFAULT 1,
+  sort_order    INTEGER NOT NULL DEFAULT 0,
+  created_at    INTEGER NOT NULL,
+  updated_at    INTEGER NOT NULL,
+  CHECK (price_isk >= 0),
+  CHECK (stock >= 0)
+);
+CREATE INDEX idx_product_tenant ON product(tenant_id, active, sort_order);
+CREATE UNIQUE INDEX idx_product_slug ON product(tenant_id, slug);
+
+CREATE TABLE shop_order (
+  id              TEXT PRIMARY KEY,
+  tenant_id       TEXT NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
+  -- Short reference the customer reads over the phone, e.g. "P-4K7Q".
+  reference       TEXT NOT NULL,
+  customer_id     TEXT NOT NULL REFERENCES customer(id) ON DELETE RESTRICT,
+  status          TEXT NOT NULL DEFAULT 'ny'
+                  CHECK (status IN ('ny','stadfest','i_smidum','tilbuin','afhent','haett')),
+  delivery        TEXT NOT NULL DEFAULT 'saekja' CHECK (delivery IN ('saekja','sending')),
+  source          TEXT NOT NULL DEFAULT 'vefur'
+                  CHECK (source IN ('vefur','simi','stjornbord')),
+  address         TEXT NOT NULL DEFAULT '',
+  postcode        TEXT NOT NULL DEFAULT '',
+  city            TEXT NOT NULL DEFAULT '',
+  notes           TEXT NOT NULL DEFAULT '',      -- from the customer
+  internal_notes  TEXT NOT NULL DEFAULT '',      -- workshop only
+  items_isk       INTEGER NOT NULL DEFAULT 0,
+  shipping_isk    INTEGER NOT NULL DEFAULT 0,
+  total_isk       INTEGER NOT NULL DEFAULT 0,
+  vsk_isk         INTEGER NOT NULL DEFAULT 0,
+  -- Opaque token behind the customer's own status page.
+  status_token    TEXT NOT NULL,
+  confirmation_sent_at INTEGER,
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL,
+  cancelled_at    INTEGER
+);
+CREATE INDEX idx_shop_order_tenant ON shop_order(tenant_id, created_at DESC);
+CREATE INDEX idx_shop_order_status ON shop_order(tenant_id, status, created_at DESC);
+CREATE UNIQUE INDEX idx_shop_order_reference ON shop_order(tenant_id, reference);
+CREATE UNIQUE INDEX idx_shop_order_token ON shop_order(status_token);
+
+CREATE TABLE order_item (
+  id              TEXT PRIMARY KEY,
+  order_id        TEXT NOT NULL REFERENCES shop_order(id) ON DELETE CASCADE,
+  product_id      TEXT REFERENCES product(id) ON DELETE SET NULL,
+  name            TEXT NOT NULL,
+  variant         TEXT NOT NULL DEFAULT '',      -- e.g. engraving, chosen wood
+  unit_price_isk  INTEGER NOT NULL DEFAULT 0,
+  vsk_rate        REAL NOT NULL DEFAULT 0.24,
+  quantity        INTEGER NOT NULL DEFAULT 1,
+  line_total_isk  INTEGER NOT NULL DEFAULT 0,
+  sort_order      INTEGER NOT NULL DEFAULT 0,
+  CHECK (quantity > 0)
+);
+CREATE INDEX idx_order_item_order ON order_item(order_id, sort_order);
+CREATE INDEX idx_order_item_product ON order_item(product_id);
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'upphafsskema', sql: initialSchema },
   { version: 2, name: 'innskraningarspurningar_og_vefutgafur', sql: intakeAnswers },
   { version: 3, name: 'ytri_vefhysing', sql: externalHosting },
+  { version: 4, name: 'vefverslun', sql: webshop },
 ];

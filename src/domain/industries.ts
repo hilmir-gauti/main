@@ -27,19 +27,38 @@ export interface PresetHours {
   [weekday: number]: Array<[number, number]>;
 }
 
+/**
+ * A stocked or made-to-order item, for trades that sell objects rather than
+ * hours. Only the webstore industries define these.
+ */
+export interface PresetProduct {
+  name: string;
+  tagline: string;
+  description: string;
+  category: string;
+  material: string;
+  dimensions: string;
+  priceIsk: number;
+  madeToOrder?: boolean;
+  leadTimeDays?: number;
+  stock?: number;
+}
+
 export interface IndustryPreset {
   key: string;
   label: string;
   /** Plural, for headings: "Verkstæði sem við þjónustum". */
   emoji: string;
   /** Which website template to generate. */
-  template: 'stofa' | 'verkstaedi' | 'idnadarmadur' | 'heilsa' | 'almennt';
+  template: 'stofa' | 'verkstaedi' | 'idnadarmadur' | 'heilsa' | 'smidja' | 'almennt';
   tagline: string;
   about: string;
   /** Words used in the generated website's call-to-action. */
   bookVerb: string;
   /** What an end customer is called in this trade's copy. */
   services: PresetService[];
+  /** Starting catalogue for trades that sell objects. Empty for the rest. */
+  products?: PresetProduct[];
   hours: PresetHours;
   /** Whether bookings are normally tied to a named person. */
   staffled: boolean;
@@ -302,6 +321,129 @@ export const INDUSTRIES: IndustryPreset[] = [
     questions: [
       { key: 'staff_count', label: 'Hversu margir nuddarar starfa hjá ykkur?', hint: 'Hver fær sitt eigið dagatal.' },
       { key: 'rooms', label: 'Hversu mörg nuddherbergi eru til staðar?', hint: 'Stýrir samtímabókunum.' },
+    ],
+  },
+  {
+    key: 'tresmidi',
+    label: 'Trésmíði og hönnun',
+    emoji: '🪵',
+    template: 'smidja',
+    tagline: 'Handsmíðaðir hlutir úr gæðaviði',
+    about:
+      'Við hönnum og smíðum handgerðar vörur úr gæðaefnum þar sem lögð er áhersla á vandaða smíði, fallegt útlit og endingargæði. Hver vara er unnin af alúð og því eru engin tvö eintök alveg eins. Við tökum einnig að okkur séróskir þegar það er mögulegt.',
+    bookVerb: 'Bóka ráðgjöf',
+    staffled: false,
+    defaultStaffTitle: 'Smiður',
+    // A workshop that sells objects still books the one thing that needs a
+    // person and a calendar: the conversation before a commission.
+    services: [
+      { name: 'Ráðgjöf um sérsmíði', description: 'Farið yfir hugmynd, efnisval, stærð og verð.', durationMin: 30, priceIsk: 0 },
+      { name: 'Mátun og uppsetning', description: 'Mæling á staðnum fyrir innréttingu eða húsgagn.', durationMin: 90, priceIsk: 19900 },
+    ],
+    products: [
+      {
+        name: 'Skurðarbretti með epoxý',
+        tagline: 'Eik og rauð epoxý-á',
+        description:
+          'Skurðarbretti úr gegnheilli eik með rennandi epoxý-á í gegn og safarauf meðfram brúninni. Slípað í fjórum umferðum og olíuborið með matvælaöruggri viðarolíu.',
+        category: 'Skurðarbretti',
+        material: 'Eik og epoxý',
+        dimensions: '30 × 40 cm',
+        priceIsk: 40000,
+        madeToOrder: true,
+        leadTimeDays: 21,
+      },
+      {
+        name: 'Skurðarbretti — endaviður',
+        tagline: 'Hnota, álmur og eik',
+        description:
+          'Endaviðarbretti límt úr hnotu, álmi og eik. Endaviður hlífir hnífseggjum og lokast aftur eftir hvert skurðarfar, sem gerir brettið að því eina sem eldhús þarf.',
+        category: 'Skurðarbretti',
+        material: 'Hnota, álmur og eik',
+        dimensions: '35 × 45 cm',
+        priceIsk: 46000,
+        madeToOrder: true,
+        leadTimeDays: 21,
+      },
+      {
+        name: 'Framreiðslubretti',
+        tagline: 'Hlynur með skálínum',
+        description:
+          'Handsmíðað framreiðslubretti með skálaga mynstri úr hlyn og lituðu epoxý. Hannað til að setja beint á borðið — ostar, brauð og það sem gestirnir grípa með sér.',
+        category: 'Framreiðsla',
+        material: 'Hlynur og epoxý',
+        dimensions: '28 × 38 cm',
+        priceIsk: 32000,
+        stock: 2,
+      },
+      {
+        name: 'Brauðbretti með rimlum',
+        tagline: 'Eik með mylsnuskúffu',
+        description:
+          'Rimlabretti úr eik með útdraganlegri skúffu undir. Mylsnan fellur niður á milli rimlanna og borðið helst hreint.',
+        category: 'Framreiðsla',
+        material: 'Eik og reykt eik',
+        dimensions: '25 × 35 cm',
+        priceIsk: 24900,
+        stock: 3,
+      },
+      {
+        name: 'Taflborð',
+        tagline: 'Hnota og hlynur',
+        description:
+          'Taflborð límt úr hnotu og hlyn með innfelldri kantlist. Reitirnir eru 50 mm og borðið er olíuborið beggja vegna svo það vindi sig ekki.',
+        category: 'Taflborð',
+        material: 'Hnota og hlynur',
+        dimensions: '45 × 45 cm',
+        priceIsk: 54000,
+        madeToOrder: true,
+        leadTimeDays: 28,
+      },
+      {
+        name: 'Kattabæli',
+        tagline: 'Hús sem má sjást í stofunni',
+        description:
+          'Lokað bæli úr birki á eikarfótum, með mjúkri dýnu sem má taka úr og þvo. Smíðað fyrir köttinn en teiknað fyrir stofuna.',
+        category: 'Fyrir dýrin',
+        material: 'Birki og eik',
+        dimensions: '55 × 40 × 40 cm',
+        priceIsk: 39000,
+        madeToOrder: true,
+        leadTimeDays: 21,
+      },
+      {
+        name: 'Handklæðastandur',
+        tagline: 'Eik fyrir baðherbergið',
+        description:
+          'Standur úr olíuborinni eik með þremur slám. Þolir raka baðherbergisins og þarf hvorki skrúfur í vegg né verkfæri við samsetningu.',
+        category: 'Baðherbergi',
+        material: 'Olíuborin eik',
+        dimensions: '80 × 45 × 35 cm',
+        priceIsk: 27900,
+        stock: 4,
+      },
+      {
+        name: 'Sófaborð með epoxý-á',
+        tagline: 'Hnota með lifandi brún',
+        description:
+          'Sófaborð úr hnotu með lifandi brún og hvítri epoxý-á sem rennur eftir borðinu endilöngu. Fæturnir eru krosslagðir úr sama viði. Hvert borð er smíðað úr einni plötu, svo mynstrið endurtekur sig aldrei.',
+        category: 'Húsgögn',
+        material: 'Hnota, hlynur og epoxý',
+        dimensions: 'L 116 · B 62 · H 42 cm',
+        priceIsk: 250000,
+        madeToOrder: true,
+        leadTimeDays: 45,
+      },
+    ],
+    hours: {
+      1: [h(9, 17)], 2: [h(9, 17)], 3: [h(9, 17)], 4: [h(9, 17)], 5: [h(9, 16)], 6: [h(11, 14)], 7: [],
+    },
+    greeting:
+      'Góðan dag, þetta er {name}. Þú getur skoðað vörurnar á vefnum, spurt um sérsmíði eða skilið eftir skilaboð og við hringjum til baka.',
+    questions: [
+      { key: 'sersmidi', label: 'Takið þið að ykkur sérsmíði?', hint: 'Birtist á vefsíðunni og opnar fyrirspurnarform.' },
+      { key: 'sending', label: 'Sendið þið vörur um landið?', hint: 'Stýrir afhendingarvalkostum í körfunni.' },
+      { key: 'efni', label: 'Hvaða viðartegundir vinnið þið helst með?', hint: 'Notað í vörulýsingar, t.d. „eik, hnota og álmur“.' },
     ],
   },
   {

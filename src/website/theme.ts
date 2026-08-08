@@ -11,7 +11,7 @@
  * like *their* business.
  */
 
-export type VariantKey = 'klassiskt' | 'nutima' | 'hlyleg';
+export type VariantKey = 'klassiskt' | 'nutima' | 'hlyleg' | 'skogur';
 
 export interface Variant {
   key: VariantKey;
@@ -124,6 +124,122 @@ export function buildPalette(brandColor: string, dark = false): Palette {
 const SYSTEM_SANS = `-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif`;
 const SYSTEM_SERIF = `'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, 'Times New Roman', serif`;
 
+/**
+ * Dark, warm and deliberately committed: this one does not follow the system
+ * theme, because the whole point of it is the unlit-workshop feeling. A pale
+ * version of it would be a different design, not a lighter one.
+ *
+ * Everything on the page is built from two colours — the wood (the tenant's
+ * brand colour, which for a joinery is the colour of maple) and the forest it
+ * came out of. The glass panels, the glow and the grain are what make a page
+ * with no photography still look like a made thing.
+ */
+const skogur: Variant = {
+  key: 'skogur',
+  label: 'Skógur',
+  description:
+    'Dökkt og hlýtt: næturskógur, dökkur hlynur og gler. Mjúkar hreyfingar, kortasjá sem lifnar við þegar músin fer yfir. Hentar þeim sem selja handsmíðaða hluti.',
+  suits: ['tresmidi'],
+  fonts: { heading: SYSTEM_SERIF, body: SYSTEM_SANS },
+  layout: { hero: 'midja', services: 'listi', corner: '20px', width: '1180px' },
+  css: (p) => {
+    const glow = mix(p.brand, '#ffffff', 0.34);
+    const ember = mix(p.brand, '#7f1d1d', 0.5);
+    const ink = '#f4ede1';
+    const surface = '#0b100d';
+    const surfaceAlt = '#111a15';
+    const border = '#22302a';
+
+    return `
+      /* The palette is redefined here rather than in the shared block: this
+         variant looks the same at noon as it does at midnight. */
+      :root{
+        --brand:${p.brand}; --brand-dark:${p.brandDark}; --brand-light:${glow};
+        --on-brand:#1a1206; --ink:${ink}; --muted:#9cb0a1;
+        --surface:${surface}; --surface-alt:${surfaceAlt}; --border:${border};
+        --glow:${glow}; --ember:${ember};
+        --moss:#16221b;
+        color-scheme: dark;
+      }
+
+      body{
+        background:${surface};
+        /* Three fixed washes of light, then a grain that sits over everything —
+           the difference between "dark mode" and "a lit workshop at night". */
+        background-image:
+          radial-gradient(80rem 40rem at 12% -10%, color-mix(in srgb, ${p.brand} 16%, transparent), transparent 60%),
+          radial-gradient(60rem 40rem at 100% 8%, color-mix(in srgb, ${ember} 14%, transparent), transparent 62%),
+          radial-gradient(70rem 50rem at 50% 100%, #12241a 0%, transparent 60%);
+        background-attachment:fixed;
+      }
+      body::before{
+        content:'';position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;
+        background-image:
+          repeating-linear-gradient(92deg, rgba(255,255,255,.018) 0 1px, transparent 1px 3px),
+          repeating-linear-gradient(178deg, rgba(0,0,0,.16) 0 2px, transparent 2px 7px);
+      }
+      body>*{position:relative;z-index:1}
+
+      h1,h2,h3{letter-spacing:-.015em}
+      .eyebrow{color:${glow};letter-spacing:.24em;font-size:.72rem}
+      .lead{color:#b6c6ba}
+
+      /* --- Hero ---------------------------------------------------------- */
+      .hero{padding:clamp(5rem,13vw,9rem) 0 clamp(3.5rem,8vw,6rem);text-align:center}
+      .hero h1{
+        font-size:clamp(2.6rem,7vw,5rem);line-height:1.02;
+        background:linear-gradient(180deg, ${ink} 8%, ${glow} 62%, ${p.brand} 100%);
+        -webkit-background-clip:text;background-clip:text;color:transparent;
+      }
+      .hero .lead{max-width:40rem;margin-inline:auto;font-size:clamp(1.05rem,2vw,1.3rem)}
+      .hero-actions{justify-content:center}
+      .rule{
+        width:min(420px,70%);height:1px;margin:1.8rem auto .4rem;border-radius:2px;
+        background:linear-gradient(90deg,transparent,${p.brand},transparent);
+        box-shadow:0 0 22px color-mix(in srgb, ${p.brand} 60%, transparent);
+      }
+
+      /* --- Surfaces ------------------------------------------------------ */
+      .section{border-top:1px solid ${border};padding-block:clamp(3.5rem,8vw,5.5rem)}
+      .section-title{text-align:center;margin-inline:auto}
+      .section-title p{margin-inline:auto;max-width:38rem}
+      .panel,.booking-shell,.service-item,.faq details,.stat{
+        background:linear-gradient(155deg, rgba(255,255,255,.045), rgba(255,255,255,.012));
+        border:1px solid ${border};border-radius:var(--corner);
+        -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+      }
+      .stat-strip{background:${border};box-shadow:0 24px 60px -40px #000}
+      .stat strong{color:${ink}}
+
+      .service-item{display:flex;gap:1.25rem;align-items:center;padding:1.15rem 1.4rem;margin-bottom:.7rem}
+      .service-item .meta{flex:1}
+      .service-item .price{font-weight:700;color:${glow};white-space:nowrap}
+      .service-item:hover{border-color:color-mix(in srgb, ${p.brand} 55%, ${border})}
+
+      .hours th{color:#9cb0a1}
+      .hours tr+tr th,.hours tr+tr td{border-top:1px solid ${border}}
+
+      /* --- Buttons ------------------------------------------------------- */
+      .btn{border-radius:999px;letter-spacing:.01em}
+      .btn-primary{
+        background:linear-gradient(135deg, ${mix(p.brand, '#ffffff', 0.16)}, ${p.brandDark});
+        color:#150e05;
+        box-shadow:0 10px 34px -12px color-mix(in srgb, ${p.brand} 90%, transparent),
+                   inset 0 1px 0 rgba(255,255,255,.35);
+      }
+      .btn-ghost{border-color:${border};color:${ink};background:rgba(255,255,255,.03)}
+      .btn-ghost:hover{border-color:${p.brand};color:${glow}}
+
+      .brandmark .dot{background:${p.brand};box-shadow:0 0 0 4px color-mix(in srgb, ${p.brand} 20%, transparent),
+                      0 0 20px color-mix(in srgb, ${p.brand} 70%, transparent)}
+      .sitenav.is-stuck{background:color-mix(in srgb, ${surface} 78%, transparent)}
+
+      footer{border-top:1px solid ${border}}
+      a{color:${glow}}
+    `;
+  },
+};
+
 export const VARIANTS: Variant[] = [
   {
     key: 'klassiskt',
@@ -196,6 +312,7 @@ export const VARIANTS: Variant[] = [
       .section { padding-block:clamp(2.5rem,6vw,4rem); }
     `,
   },
+  skogur,
 ];
 
 export function variantByKey(key: string): Variant {

@@ -18,6 +18,7 @@ import { applyPresetServices, createStaff, listServices, listStaff, updateServic
 import { emit } from './events.ts';
 import { industryPreset } from './industries.ts';
 import { applyPresetHours } from './schedule.ts';
+import { applyPresetProducts, listProducts } from './shop/products.ts';
 import { getTenantOrThrow, setFeatures, updateTenant } from './tenants.ts';
 import type { Feature } from './types.ts';
 import { buildEmailPlan, type EmailProvider } from '../integrations/email/provisioning.ts';
@@ -180,6 +181,7 @@ export interface ProvisionInput {
 export interface ProvisionResult {
   tasksCreated: number;
   servicesCreated: number;
+  productsCreated: number;
   staffCreated: number;
   variantsBuilt: number;
   pairingCode: string | null;
@@ -195,6 +197,7 @@ export function provisionTenant(input: ProvisionInput): ProvisionResult {
   const features = new Set(input.features);
 
   let servicesCreated = 0;
+  let productsCreated = 0;
   let staffCreated = 0;
   let pairingCode: string | null = null;
 
@@ -205,6 +208,17 @@ export function provisionTenant(input: ProvisionInput): ProvisionResult {
     if (!input.keepCatalogue && listServices(tenant.id, { includeInactive: true }).length === 0) {
       servicesCreated = applyPresetServices(tenant.id, preset.services).length;
       applyPresetHours(tenant.id, preset.hours);
+    }
+
+    // The starting shelf for trades that sell objects. Priced and described so
+    // the operator edits real listings rather than filling in empty ones.
+    if (
+      features.has('vefverslun')
+      && !input.keepCatalogue
+      && (preset.products?.length ?? 0) > 0
+      && listProducts(tenant.id, { includeInactive: true }).length === 0
+    ) {
+      productsCreated = applyPresetProducts(tenant.id, preset.products ?? []).length;
     }
 
     // For trades without named staff, capacity is a property of the shop
@@ -254,6 +268,26 @@ export function provisionTenant(input: ProvisionInput): ProvisionResult {
         description: 'Netbókanir eru virkar með spurningaflæði fyrir þetta fag.',
         status: 'lokid',
         detail: `Bókunarsíða: ${config.baseUrl}/v/${tenant.slug}`,
+        sortOrder: order++,
+      });
+    }
+
+    if (features.has('vefverslun')) {
+      const products = listProducts(tenant.id, { includeInactive: true });
+      // Photographs are the one thing this platform cannot generate, and a
+      // handmade object does not sell without one — so it is a real task.
+      const missingImages = products.filter((product) => !product.imageUrl).length;
+
+      upsertTask(tenant.id, {
+        key: 'vefverslun',
+        title: 'Settu myndir á vörurnar',
+        description: `${products.length} vörur eru komnar í vörulistann. Vörur seljast ekki myndalausar — settu inn slóð á mynd fyrir hverja þeirra.`,
+        requiresOperator: missingImages > 0,
+        status: missingImages > 0 ? 'bidur' : 'lokid',
+        detail: missingImages > 0
+          ? `${missingImages} af ${products.length} vörum vantar mynd.`
+          : 'Allar vörur eru með mynd.',
+        payload: { vorulisti: `${config.baseUrl}/vidskiptavinir/${tenant.id}/verslun` },
         sortOrder: order++,
       });
     }
@@ -365,6 +399,7 @@ export function provisionTenant(input: ProvisionInput): ProvisionResult {
     features: [...features],
     tasks: tasks.length,
     servicesCreated,
+    productsCreated,
     staffCreated,
   });
 
@@ -373,6 +408,7 @@ export function provisionTenant(input: ProvisionInput): ProvisionResult {
   return {
     tasksCreated: tasks.length,
     servicesCreated,
+    productsCreated,
     staffCreated,
     variantsBuilt,
     pairingCode,

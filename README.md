@@ -4,9 +4,10 @@ Stjórnborð fyrir stafræna þjónustu við íslensk smáfyrirtæki — vefsí�
 tölvupóstur og símsvörun.
 
 Þú slærð inn nafn fyrirtækis, velur fag, hakar við það sem á að setja upp og
-kerfið gerir afganginn: býr til þjónustulista og opnunartíma, smíðar þrjár
+kerfið gerir afganginn: býr til þjónustulista og opnunartíma, smíðar fjórar
 fullbúnar vefsíður til að velja úr, setur upp bókunarkerfi með spurningaflæði
-sem hæfir faginu, og býr til verkefnalista með nákvæmlega því sem þarf að gera
+sem hæfir faginu — eða vefverslun með vörulista og körfu fyrir þá sem selja
+hluti en ekki tíma, og býr til verkefnalista með nákvæmlega því sem þarf að gera
 handvirkt (DNS-færslur, Twilio-slóðir, Google-tenging).
 
 Þetta er eins notanda kerfi. Aðgangurinn er einn — þinn.
@@ -21,6 +22,7 @@ handvirkt (DNS-færslur, Twilio-slóðir, Google-tenging).
 - [Spurningaflæði eftir fagi](#spurningaflæði-eftir-fagi)
 - [Vefsíðugerð](#vefsíðugerð)
 - [Bókanavélin](#bókanavélin)
+- [Vefverslun](#vefverslun)
 - [Tengingar](#tengingar)
 - [Uppbygging](#uppbygging)
 - [Rekstur](#rekstur)
@@ -99,7 +101,7 @@ Krafa: **Node.js 22.5 eða nýrra** (kerfið notar innbyggða SQLite-einingu Nod
 npm install                 # aðeins þýðingartól — engar keyrsluháðar einingar
 cp .env.example .env        # fylltu út það sem þú átt; restin fer í þurrkeyrslu
 npm run setup               # stofnar stjórnandaaðganginn þinn
-npm run seed                # valfrjálst: þrír sýniviðskiptavinir með bókunum
+npm run seed                # valfrjálst: fjórir sýniviðskiptavinir með bókunum og pöntunum
 npm run dev                 # ræsir á http://localhost:8080
 ```
 
@@ -184,25 +186,31 @@ Staða hverrar tengingar sést á `/stillingar`.
 | --- | --- |
 | `/stjornbord` | Staðan á öllum viðskiptavinum, hvað bíður aðgerða, frídagar framundan |
 | `/vidskiptavinir/nyr` | Uppsetningarhjálpin — ein síða, allt sett upp |
-| `/vidskiptavinir/:id/vefur` | Þrjár útlitstillögur hlið við hlið, veldu og birtu |
+| `/vidskiptavinir/:id/vefur` | Fjórar útlitstillögur hlið við hlið, veldu og birtu |
 | `/vidskiptavinir/:id/verkefni` | Verkefnalisti með DNS-færslum, vefkrókum og pörunarkóðum |
 | `/vidskiptavinir/:id/bokanir` | Dagbók með öllum svörum viðskiptavina |
+| `/vidskiptavinir/:id/verslun` | Vörulisti, birgðir, myndir og afhendingarreglur |
+| `/vidskiptavinir/:id/pantanir` | Pantanir í vinnslu, frá „ný“ að „afhent“ |
 | `/vidskiptavinir/:id/simtol` | Símtalaskrá með umritunum úr símsvara |
 | `/samskipti` | Allur póstur og SMS sem kerfið hefur sent, með stöðu |
 
 ### Fyrir viðskiptavininn (fyrirtækið)
 
 - Vefsíða á eigin léni með bókunarkerfi.
+- Vefverslun fyrir þá sem selja hluti en ekki tíma — vörulisti, karfa og
+  pantanir, með birgðum og afgreiðslutíma.
 - Bókanir birtast í Google-dagatalinu þeirra; einkatímar í dagatalinu loka á
   bókanir á móti.
 - Símsvari sem svarar á íslensku, bókar tíma og tekur skilaboð utan opnunartíma.
 - Snjallsímaapp (iOS og Android) með tilkynningum um leið og bókun berst.
 
-### Fyrir viðskiptavini þeirra (fólkið sem bókar)
+### Fyrir viðskiptavini þeirra (fólkið sem bókar eða kaupir)
 
 - Bókun á íslensku með spurningum sem hæfa faginu.
 - Staðfesting í tölvupósti og SMS, með afbókunartengli.
 - Áminning sólarhring fyrir tímann.
+- Karfa og pöntun án þess að stofna aðgang, og eigin stöðusíða á
+  `/pontun/<auðkenni>` sem segir hvar hluturinn er staddur í smíði.
 
 ---
 
@@ -354,14 +362,19 @@ sagt berum orðum í staðinn fyrir að vera þagað yfir.
 
 ## Útlitstillögur
 
-Þegar uppsetningarhjálpin klárast eru smíðaðar **þrjár fullbúnar vefsíður** úr
-sama efni — ekki þrjú litaþemu, heldur þrjár ólíkar hönnunarákvarðanir:
+Þegar uppsetningarhjálpin klárast eru smíðaðar **fjórar fullbúnar vefsíður** úr
+sama efni — ekki fjögur litaþemu, heldur fjórar ólíkar hönnunarákvarðanir:
 
 | Útlit | Lýsing |
 | --- | --- |
 | **Klassískt** | Ljóst og hreint, serif-fyrirsagnir, verðskrá í línum |
 | **Nútímalegt** | Dökkur hluti efst, sterk leturgerð, skipt uppsetning, spjöld |
 | **Hlýlegt** | Mjúkir litir, rúnnuð form, loftgott, listauppsetning |
+| **Skógur** | Dökkur næturskógur og hlynur, gler og glóð, hreyfingar sem svara músinni |
+
+**Skógur** fylgir ekki kerfisþemanu heldur er alltaf dökkt — það er tilgangurinn
+með því. Það er hannað fyrir verkstæði sem selja handsmíðaða hluti, þar sem
+varan sjálf á að vera það eina bjarta á síðunni.
 
 Þú sérð þær hlið við hlið á `/vidskiptavinir/:id/vefur`, opnar hverja fyrir sig
 í fullri stærð og velur. Valin síða fer í loftið á `/v/<auðkenni>` eða á léni
@@ -405,6 +418,43 @@ Reiknað er tillit til:
 Tvíbókun er útilokuð: tíminn er staðfestur aftur innan sömu færslu og bókunin er
 skrifuð, svo tveir sem smella á sama tímann á sama augnabliki geta ekki báðir
 fengið hann.
+
+---
+
+## Vefverslun
+
+Sum fyrirtæki selja hluti en ekki tíma. Trésmíðaverkstæði sem sendir frá sér
+skurðarbretti og sófaborð hefur ekkert við dagbók að gera — það þarf hillu,
+körfu og pantanir. Eiginleikinn **Vefverslun** bætir því við sömu vefsíðu.
+
+**Vara** er hliðstæða þjónustu í bókanakerfinu. Munurinn sem mótar allt hitt er
+að handsmíðaður hlutur er annaðhvort **til á verkstæðinu núna** eða **smíðaður
+eftir pöntun** — vara telur því annaðhvort birgðir eða gefur upp afgreiðslutíma,
+aldrei hvort tveggja. Uppselt eintak hverfur úr körfunni en stendur áfram á
+síðunni; „uppselt“ á handsmíðuðum hlut segir sína sögu um verkstæðið.
+
+**Verðið er reiknað á þjóninum.** Karfan sem berst úr vafranum er listi af
+óskum — auðkenni og fjöldi — og hver króna er reiknuð upp á nýtt úr vörulistanum
+þegar pöntunin kemur inn. Verð sem búið er að breyta í vafranum kaupir því
+ekkert.
+
+**Birgðir eru teknar frá í sömu færslu og pöntunin er skrifuð**, með fjöldann í
+`WHERE`-skilyrðinu. Tveir sem kaupa síðasta brettið á sama augnabliki geta ekki
+báðir fengið það, og sá seinni fær villu frekar en hálfskrifaða pöntun.
+
+**Engin kortagreiðsla.** Þessi verkstæði taka við millifærslu eða greiðslu við
+afhendingu, og það væri rangt að geyma kortaupplýsingar fyrir fyrirtæki sem bað
+aldrei um það. Pöntunin er staðfest, greiðsluupplýsingar fylgja í póstinum.
+
+Pöntun gengur í gegnum verkstæðið: **ný → staðfest → í smíðum → tilbúin →
+afhent**. Hvert skref sendir póst á kaupandann og uppfærir stöðusíðuna hans á
+`/pontun/<auðkenni>`. Sé hætt við pöntun fara eintökin aftur í hilluna.
+
+Verslunin sjálf er hluti af sömu einu HTML-skránni: hillan er skrifuð inn í
+markup-ið (svo síðan selur þótt skriftan keyri aldrei, og leitarvélar sjái
+vörurnar með `Product` structured data), og karfan bætist ofan á. Vöru sem
+vantar mynd er teiknuð viðaráferð úr heiti vörunnar — sama áferð í hvert sinn,
+ólík milli vara — því tómur grár kassi selur ekkert.
 
 ---
 
@@ -507,8 +557,9 @@ src/
 │   └── html.ts          Sjálfvirk vörn gegn XSS
 ├── domain/          Viðskiptareglur, engin ytri köll
 │   ├── booking/         Bókanavélin og lífsferill bókana
+│   ├── shop/            Vörulisti, birgðir, verðútreikningur og pantanir
 │   ├── intake/          Spurningaflæði eftir fagi
-│   ├── industries.ts    Forstillingar: þjónustur, verð, opnunartími
+│   ├── industries.ts    Forstillingar: þjónustur, vörur, verð, opnunartími
 │   └── provisioning.ts  Uppsetningarferlið
 ├── integrations/    Allt sem talar við umheiminn
 │   ├── google/          OAuth og dagatalssamstilling
@@ -516,16 +567,16 @@ src/
 │   ├── voice/           TwiML og símsvari
 │   ├── push/            Tækjapörun og Expo-tilkynningar
 │   └── subscribers.ts   Tengir atburði við hliðarverkanir
-├── website/         Vefsíðugerð og útlitsútgáfur
+├── website/         Vefsíðugerð, útlitsútgáfur og verslunarviðmót
 ├── admin/           Stjórnborðið
-├── publicapi/       Bókunarviðmót vefsíðna
+├── publicapi/       Bókunar- og pöntunarviðmót vefsíðna
 └── mobileapi/       Viðmót snjallsímaappsins
 
 src/desktop/         Ræsing sem skjáborðsforrit (gagnamappa, port, vafri)
 build/make-exe.mjs   Smíðar keyrsluskrá: esbuild → SEA-blob → Node-keyrslu
 
 mobile/              Expo-app fyrir iOS og Android
-tests/               139 prófanir
+tests/               215 prófanir
 ```
 
 ### Engar keyrsluháðar einingar
@@ -544,10 +595,11 @@ SMTP-biðlarinn er skrifaður beint ofan á `node:net`/`node:tls`.
 npm test
 ```
 
-139 prófanir: bókanavélin (biðtímar, hlé, frídagar, afkastageta, tvíbókun),
-spurningaflæðin (allar greinar bílaverkstæðisins), íslenskar reglur (kennitölur,
-símanúmer, krónur), tímabeltisumreikningur, SMTP-skeytasmíði, og prófun frá enda
-til enda sem ræsir raunverulegan vefþjón og fer í gegnum allt ferlið:
+215 prófanir: bókanavélin (biðtímar, hlé, frídagar, afkastageta, tvíbókun),
+vefverslunin (verðútreikningur á þjóni, birgðir þegar tveir kaupa það síðasta,
+afhendingarreglur), spurningaflæðin (allar greinar bílaverkstæðisins), íslenskar
+reglur (kennitölur, símanúmer, krónur), tímabeltisumreikningur,
+SMTP-skeytasmíði, og prófun frá enda til enda sem ræsir raunverulegan vefþjón og fer í gegnum allt ferlið:
 innskráning → uppsetningarhjálp → vefsíðuval → birting → bókun með greinóttu
 flæði → afkastageta → afbókun.
 
@@ -590,10 +642,16 @@ services to small Icelandic businesses: generated websites, booking systems,
 email provisioning and an Icelandic-speaking phone receptionist.
 
 You enter a company name, pick a trade, tick the features you want, and the
-system creates a service catalogue with realistic prices, opening hours, three
+system creates a service catalogue with realistic prices, opening hours, four
 complete website designs to choose between, a trade-specific branching intake
 questionnaire, and a checklist containing exactly the values needed for the
 manual steps (DNS records, webhook URLs, pairing codes).
+
+Trades that sell objects rather than hours — a joinery shipping cutting boards
+and coffee tables — get a webstore on the same page instead: a shelf rendered
+into the markup, a basket, and orders that move through the workshop. Prices are
+recomputed on the server from the catalogue, and stock is reserved in the same
+transaction that writes the order.
 
 The interface and all customer-facing output are in Icelandic, because that is
 who it serves. The code and comments are in English.
@@ -609,6 +667,6 @@ Notable properties:
   +354 phone classification, ISK/VSK handling, and public holidays computed
   (including Easter-derived dates, sumardagurinn fyrsti and frídagur
   verslunarmanna) rather than hard-coded.
-- **139 tests**, including an end-to-end run against a real HTTP server.
+- **215 tests**, including an end-to-end run against a real HTTP server.
 
 See `.env.example` for configuration and `mobile/README.md` for the phone app.
