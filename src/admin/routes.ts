@@ -600,7 +600,7 @@ export function adminRouter(): Router {
           <div class="head">
             <div>
               <h1>Veldu útlit</h1>
-              <p class="sub">Þrjár fullbúnar tillögur með sama efni. Smelltu til að skoða í fullri stærð og veldu svo þá sem passar.</p>
+              <p class="sub">${variants.length} fullbúnar tillögur með sama efni. Smelltu til að skoða í fullri stærð og veldu svo þá sem passar.</p>
             </div>
             <div class="btn-row">
               ${tenant.websiteDomain
@@ -1867,7 +1867,7 @@ function loginPage(next: string, error: string | null): SafeHtml {
             vefsíður, bókanir, tölvupóst og símsvörun.
           </p>
           <ul class="auth-points">
-            <li><strong>Vefsíður</strong> — þrjár tillögur, þú velur</li>
+            <li><strong>Vefsíður</strong> — fjórar tillögur, þú velur</li>
             <li><strong>Bókanir</strong> — spurningaflæði eftir fagi</li>
             <li><strong>Tölvupóstur</strong> — DNS-færslur og eftirlit</li>
             <li><strong>Símsvörun</strong> — svarar á íslensku</li>
@@ -2092,7 +2092,7 @@ function wizardForm(ctx: RequestContext, values: Record<string, string>, errors:
               <li><strong data-fact="thjonustur"></strong> þjónustur með verði og tímalengd</li>
               <li>Opnunartími fyrir <strong data-fact="label"></strong></li>
               <li>Spurningaflæði með <strong data-fact="spurningar"></strong> spurningum</li>
-              <li>Þrjár fullbúnar útlitstillögur að vefsíðu</li>
+              <li>Fjórar fullbúnar útlitstillögur að vefsíðu</li>
               <li>Verkefnalisti með því sem þarf að klára handvirkt</li>
             </ul>
           </div>
