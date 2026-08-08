@@ -254,7 +254,7 @@ export function provisionTenant(input: ProvisionInput): ProvisionResult {
       upsertTask(tenant.id, {
         key: 'vefsida',
         title: 'Veldu útlit og birtu vefsíðu',
-        description: 'Þrjár útlitstillögur hafa verið útbúnar. Skoðaðu þær og veldu þá sem passar.',
+        description: 'Útlitstillögur hafa verið útbúnar. Skoðaðu þær og veldu þá sem passar.',
         requiresOperator: true,
         payload: { forskodunSlod: `${config.baseUrl}/vidskiptavinir/${tenant.id}/vefur` },
         sortOrder: order++,
