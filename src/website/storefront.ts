@@ -610,6 +610,7 @@ export function storefrontScript(): string {
     config: null,       // catalogue and shop policy, fetched on first open
     step: 'karfa',      // karfa -> skil -> lokid
     delivery: null,
+    offline: false,   // catalogue unreachable; the shelf still prices the basket
     form: {},
     submitting: false,
     order: null,
@@ -726,6 +727,7 @@ export function storefrontScript(): string {
     loading = request('/verslun?slug=' + encodeURIComponent(slug))
       .then(function (data) {
         state.config = data;
+        state.offline = false;
         if (!state.delivery) state.delivery = data.stillingar.maSaekja ? 'saekja' : 'sending';
         // Something sold out, or was taken off the shelf, while the basket sat
         // in this browser. Drop it rather than fail at checkout.
@@ -746,7 +748,11 @@ export function storefrontScript(): string {
       })
       .catch(function () {
         loading = null;
-        state.error = 'Ekki tókst að sækja vörulistann. Reyndu aftur eftir smástund.';
+        // Not an error the shopper needs to see yet. The basket prices itself
+        // from the shelf that is already on the page, so browsing and adding
+        // still work; only the checkout genuinely needs the catalogue, and it
+        // raises this itself when the submit fails.
+        state.offline = true;
         return null;
       });
 
@@ -1117,7 +1123,15 @@ export function storefrontScript(): string {
         onclick: function () {
           state.step = 'skil';
           state.error = '';
-          loadConfig().then(render);
+          // Checkout is where the catalogue actually matters — for the delivery
+          // options, the postage and the final price. Say so here if it never
+          // arrived, rather than the moment the basket was opened.
+          loadConfig().then(function () {
+            if (state.offline) {
+              state.error = 'Ekki næst samband við verslunina í augnablikinu. Reyndu aftur eftir smástund.';
+            }
+            render();
+          });
           render();
         }
       }));
